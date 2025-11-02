@@ -7,7 +7,8 @@ const appState = {
     modelLoaded: false,
     currentImage: null,
     chatHistory: [],
-    isGenerating: false
+    isGenerating: false,
+    sessionId: null  // 会话ID，用于记忆上下文对话
 };
 
 // DOM元素
@@ -238,13 +239,18 @@ async function handleSendMessage() {
     const thinkingMsg = addThinkingMessage();
     
     try {
-        // 发送请求
-        const result = await apiClient.chat(prompt, appState.currentImage, config);
+        // 发送请求（包含会话ID以支持上下文对话）
+        const result = await apiClient.chat(prompt, appState.currentImage, config, appState.sessionId);
         
         // 移除思考中提示
         thinkingMsg.remove();
         
         if (result.success) {
+            // 保存会话ID（后端返回）
+            if (result.session_id) {
+                appState.sessionId = result.session_id;
+            }
+            
             // 添加助手回复
             addMessage('assistant', result.response);
         } else {
@@ -337,20 +343,32 @@ function addThinkingMessage() {
 /**
  * 清空聊天
  */
-function handleClearChat() {
-    if (appState.chatHistory.length === 0) {
+async function handleClearChat() {
+    if (appState.chatHistory.length === 0 && !appState.sessionId) {
         return;
     }
     
-    if (confirm('确定要清空所有对话吗？')) {
-        elements.chatMessages.innerHTML = `
-            <div class="welcome-message">
-                <h2>👋 欢迎使用 Lingshu-7B 医学助手</h2>
-                <p>对话已清空，可以开始新的对话</p>
-            </div>
-        `;
-        appState.chatHistory = [];
-        showNotification('对话已清空', 'success');
+    if (confirm('确定要清空所有对话吗？这将清除对话的上下文记忆。')) {
+        try {
+            // 清除服务器端的对话历史
+            if (appState.sessionId) {
+                await apiClient.clearHistory(appState.sessionId);
+                appState.sessionId = null;  // 重置会话ID
+            }
+            
+            // 清除前端显示
+            elements.chatMessages.innerHTML = `
+                <div class="welcome-message">
+                    <h2>👋 欢迎使用 Lingshu-7B 医学助手</h2>
+                    <p>对话已清空，可以开始新的对话</p>
+                </div>
+            `;
+            appState.chatHistory = [];
+            showNotification('对话历史已清空（包括上下文记忆）', 'success');
+        } catch (error) {
+            console.error('清除对话失败:', error);
+            showNotification('清除对话时出错: ' + error.message, 'error');
+        }
     }
 }
 

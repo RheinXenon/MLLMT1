@@ -126,11 +126,37 @@ class ModelManager:
         generation_config: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
-        生成回复
+        生成回复（不带历史记录）
         
         Args:
             prompt: 用户输入的问题
             image_path: 图片路径（可选）
+            generation_config: 生成配置（可选）
+            
+        Returns:
+            包含生成结果的字典
+        """
+        return self.generate_response_with_history(
+            prompt=prompt,
+            image_path=image_path,
+            history=[],
+            generation_config=generation_config
+        )
+    
+    def generate_response_with_history(
+        self,
+        prompt: str,
+        image_path: Optional[str] = None,
+        history: Optional[List[Dict[str, Any]]] = None,
+        generation_config: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        生成回复（支持对话历史）
+        
+        Args:
+            prompt: 用户输入的问题
+            image_path: 图片路径（可选）
+            history: 对话历史（可选）
             generation_config: 生成配置（可选）
             
         Returns:
@@ -143,23 +169,43 @@ class ModelManager:
             }
         
         try:
-            logger.info(f"🤔 生成回复: {prompt[:50]}...")
+            if history is None:
+                history = []
             
-            # 构建消息格式
-            content = []
+            logger.info(f"🤔 生成回复: {prompt[:50]}... (历史消息数: {len(history)})")
+            
+            # 构建消息列表，包含历史对话
+            messages = []
+            
+            # 添加历史消息
+            for hist in history:
+                role = hist.get('role')
+                content = hist.get('content')
+                
+                if role and content:
+                    # 历史消息只包含文本（图片不重复发送）
+                    messages.append({
+                        "role": role,
+                        "content": [{"type": "text", "text": content}]
+                    })
+            
+            # 添加当前用户消息
+            current_content = []
             if image_path:
-                content.append({
+                current_content.append({
                     "type": "image",
                     "image": image_path
                 })
                 logger.info(f"🖼️ 包含图片: {image_path}")
             
-            content.append({"type": "text", "text": prompt})
+            current_content.append({"type": "text", "text": prompt})
             
-            messages = [{
+            messages.append({
                 "role": "user",
-                "content": content
-            }]
+                "content": current_content
+            })
+            
+            logger.info(f"📝 消息总数: {len(messages)}")
             
             # 应用聊天模板
             text = self.processor.apply_chat_template(
@@ -168,11 +214,13 @@ class ModelManager:
                 add_generation_prompt=True
             )
             
-            # 处理视觉信息
+            # 处理视觉信息（只处理当前消息）
             image_inputs = None
             video_inputs = None
             if image_path:
-                image_inputs, video_inputs = process_vision_info(messages)
+                # 只处理当前的图片消息
+                current_messages = [messages[-1]]
+                image_inputs, video_inputs = process_vision_info(current_messages)
             
             # 处理输入
             inputs = self.processor(

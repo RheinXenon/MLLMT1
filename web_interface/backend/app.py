@@ -2,13 +2,15 @@
 Lingshu-7B Web 服务 - Flask应用主文件
 """
 
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify, send_from_directory, session
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 import os
 import logging
 import traceback
 from pathlib import Path
+import uuid
+from datetime import datetime
 
 from model_manager import ModelManager
 import config
@@ -33,12 +35,17 @@ app = Flask(
 )
 app.config['MAX_CONTENT_LENGTH'] = config.MAX_FILE_SIZE
 app.config['UPLOAD_FOLDER'] = config.UPLOAD_FOLDER
+app.config['SECRET_KEY'] = 'lingshu-7b-secret-key-' + str(uuid.uuid4())  # 用于session加密
 
 # 启用CORS（允许跨域请求）
-CORS(app)
+CORS(app, supports_credentials=True)  # 支持session cookie
 
 # 全局模型管理器
 model_manager = None
+
+# 会话存储 - 存储每个会话的对话历史
+# 格式: {session_id: [{"role": "user/assistant", "content": [...], "timestamp": ...}, ...]}
+conversation_sessions = {}
 
 
 def allowed_file(filename):
@@ -131,7 +138,7 @@ def load_model():
 
 @app.route('/api/chat', methods=['POST'])
 def chat():
-    """处理聊天请求"""
+    """处理聊天请求（支持上下文记忆）"""
     if not model_manager or not model_manager.is_loaded():
         return jsonify({
             "success": False,
@@ -139,9 +146,19 @@ def chat():
         }), 400
     
     try:
+        # 获取或创建会话ID
+        session_id = request.form.get('session_id')
+        if not session_id:
+            session_id = str(uuid.uuid4())
+            logger.info(f"创建新会话: {session_id}")
+        
+        # 初始化会话历史
+        if session_id not in conversation_sessions:
+            conversation_sessions[session_id] = []
+            logger.info(f"初始化会话历史: {session_id}")
+        
         # 获取请求数据
-        data = request.form
-        prompt = data.get('prompt', '').strip()
+        prompt = request.form.get('prompt', '').strip()
         
         if not prompt:
             return jsonify({
@@ -166,13 +183,41 @@ def chat():
                         "error": "不支持的文件格式"
                     }), 400
         
-        # 生成回复
-        logger.info(f"处理请求: {prompt[:50]}... (图片: {image_path is not None})")
-        result = model_manager.generate_response(
+        # 获取会话历史
+        history = conversation_sessions[session_id]
+        
+        # 生成回复（带历史记录）
+        logger.info(f"处理请求 [会话:{session_id[:8]}]: {prompt[:50]}... (图片: {image_path is not None}, 历史消息数: {len(history)})")
+        result = model_manager.generate_response_with_history(
             prompt=prompt,
             image_path=image_path,
+            history=history,
             generation_config=config.GENERATION_CONFIG
         )
+        
+        # 如果生成成功，保存到历史记录
+        if result.get('success'):
+            # 保存用户消息
+            user_message = {
+                "role": "user",
+                "content": prompt,
+                "has_image": image_path is not None,
+                "timestamp": datetime.now().isoformat()
+            }
+            conversation_sessions[session_id].append(user_message)
+            
+            # 保存助手回复
+            assistant_message = {
+                "role": "assistant",
+                "content": result['response'],
+                "timestamp": datetime.now().isoformat()
+            }
+            conversation_sessions[session_id].append(assistant_message)
+            
+            # 添加会话ID到返回结果
+            result['session_id'] = session_id
+            
+            logger.info(f"对话已保存到历史 [会话:{session_id[:8]}], 当前消息数: {len(conversation_sessions[session_id])}")
         
         # 清理上传的临时图片
         if image_path and os.path.exists(image_path):
@@ -187,6 +232,44 @@ def chat():
     except Exception as e:
         logger.error(f"处理聊天请求时出错: {e}")
         traceback.print_exc()
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+
+@app.route('/api/clear_history', methods=['POST'])
+def clear_history():
+    """清除对话历史"""
+    try:
+        data = request.get_json()
+        session_id = data.get('session_id') if data else None
+        
+        if session_id:
+            # 清除特定会话的历史
+            if session_id in conversation_sessions:
+                del conversation_sessions[session_id]
+                logger.info(f"已清除会话历史: {session_id[:8]}")
+                return jsonify({
+                    "success": True,
+                    "message": "对话历史已清除"
+                })
+            else:
+                return jsonify({
+                    "success": True,
+                    "message": "会话不存在或已清除"
+                })
+        else:
+            # 清除所有会话历史
+            conversation_sessions.clear()
+            logger.info("已清除所有会话历史")
+            return jsonify({
+                "success": True,
+                "message": "所有对话历史已清除"
+            })
+            
+    except Exception as e:
+        logger.error(f"清除历史时出错: {e}")
         return jsonify({
             "success": False,
             "error": str(e)

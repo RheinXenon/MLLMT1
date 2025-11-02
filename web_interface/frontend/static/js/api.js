@@ -108,8 +108,9 @@ class APIClient {
      * @param {string} prompt - 用户输入的文本
      * @param {File|null} image - 图片文件（可选）
      * @param {Object} config - 生成配置（可选）
+     * @param {string|null} sessionId - 会话ID（可选，用于上下文对话）
      */
-    async chat(prompt, image = null, config = null) {
+    async chat(prompt, image = null, config = null, sessionId = null) {
         const formData = new FormData();
         formData.append('prompt', prompt);
         
@@ -121,7 +122,20 @@ class APIClient {
             formData.append('config', JSON.stringify(config));
         }
         
+        if (sessionId) {
+            formData.append('session_id', sessionId);
+        }
+        
         return await this.postFormData('/api/chat', formData);
+    }
+
+    /**
+     * 清除对话历史
+     * @param {string|null} sessionId - 会话ID（可选，不提供则清除所有）
+     */
+    async clearHistory(sessionId = null) {
+        const data = sessionId ? { session_id: sessionId } : {};
+        return await this.post('/api/clear_history', data);
     }
 }
 
