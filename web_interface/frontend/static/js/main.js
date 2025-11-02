@@ -20,7 +20,6 @@ const elements = {
     newChatBtn: document.getElementById('new-chat-btn'),
     settingsBtn: document.getElementById('settings-btn'),
     clearChatBtn: document.getElementById('clear-chat-btn'),
-    deleteChatBtn: document.getElementById('delete-chat-btn'),
     renameChatBtn: document.getElementById('rename-chat-btn'),
     sendBtn: document.getElementById('send-btn'),
     uploadBtn: document.getElementById('upload-btn'),
@@ -79,7 +78,6 @@ function bindEventListeners() {
     elements.settingsBtn.addEventListener('click', () => window.location.href = '/settings.html');
     elements.sendBtn.addEventListener('click', handleSendMessage);
     elements.clearChatBtn.addEventListener('click', handleClearChat);
-    elements.deleteChatBtn.addEventListener('click', handleDeleteChat);
     elements.renameChatBtn.addEventListener('click', handleRenameChat);
     elements.chatInput.addEventListener('keydown', handleInputKeydown);
     elements.chatInput.addEventListener('input', handleInputChange);
@@ -229,9 +227,24 @@ function updateChatList() {
             <div class="chat-item-title">${chat.title}</div>
             <div class="chat-item-preview">${preview}</div>
             <div class="chat-item-time">${timeStr}</div>
+            <button class="chat-item-delete" title="删除对话">✕</button>
         `;
         
-        chatItem.addEventListener('click', () => switchToChat(chat.id));
+        // 点击聊天项切换对话
+        chatItem.addEventListener('click', (e) => {
+            // 如果点击的是删除按钮，不切换对话
+            if (!e.target.classList.contains('chat-item-delete')) {
+                switchToChat(chat.id);
+            }
+        });
+        
+        // 删除按钮事件
+        const deleteBtn = chatItem.querySelector('.chat-item-delete');
+        deleteBtn.addEventListener('click', (e) => {
+            e.stopPropagation(); // 阻止事件冒泡
+            handleDeleteChatItem(chat.id);
+        });
+        
         elements.chatList.appendChild(chatItem);
     });
 }
@@ -284,14 +297,14 @@ function handleRenameChat() {
 }
 
 /**
- * 删除当前聊天
+ * 删除指定的聊天（从列表中）
  */
-async function handleDeleteChat() {
-    if (!appState.currentChatId) return;
+async function handleDeleteChatItem(chatId) {
+    if (!appState.chats[chatId]) return;
     
-    const chat = appState.chats[appState.currentChatId];
+    const chat = appState.chats[chatId];
     
-    if (!confirm(`确定要删除对话"${chat.title}"吗？`)) {
+    if (!confirm(`确定要删除对话"${chat.title}"吗？\n\n此操作不可恢复。`)) {
         return;
     }
     
@@ -305,15 +318,20 @@ async function handleDeleteChat() {
     }
     
     // 删除聊天
-    delete appState.chats[appState.currentChatId];
+    delete appState.chats[chatId];
     saveChatsToStorage();
     
-    // 切换到其他聊天或创建新聊天
-    const chatIds = Object.keys(appState.chats);
-    if (chatIds.length > 0) {
-        switchToChat(chatIds[0]);
+    // 如果删除的是当前聊天，切换到其他聊天或创建新聊天
+    if (chatId === appState.currentChatId) {
+        const chatIds = Object.keys(appState.chats);
+        if (chatIds.length > 0) {
+            switchToChat(chatIds[0]);
+        } else {
+            createNewChat();
+        }
     } else {
-        createNewChat();
+        // 只更新列表
+        updateChatList();
     }
     
     showNotification('对话已删除', 'success');
