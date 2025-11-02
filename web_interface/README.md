@@ -7,6 +7,9 @@
 - 🤖 **智能对话**: 专业的医学知识问答
 - 🖼️ **多模态支持**: 支持图像上传和分析
 - ⚡ **4-bit量化**: 默认使用4-bit量化，显存占用低
+- 💬 **流式输出**: 像ChatGPT一样逐字显示回复，实时反馈
+- 🧠 **上下文记忆**: 支持多轮对话，记住对话历史
+- 📂 **多会话管理**: 支持创建、切换多个对话会话
 - 🎨 **现代化UI**: 美观友好的用户界面
 - 🔧 **可配置**: 可调节温度、最大Token数等参数
 - 📱 **响应式设计**: 支持多种屏幕尺寸
@@ -164,7 +167,7 @@ POST /api/load_model
 POST /api/unload_model
 ```
 
-### 聊天
+### 聊天（普通模式）
 
 ```http
 POST /api/chat
@@ -172,6 +175,7 @@ Content-Type: multipart/form-data
 
 prompt: "这张图片显示了什么病症？"
 image: [图片文件]
+session_id: [会话ID，可选]
 ```
 
 响应示例：
@@ -179,7 +183,48 @@ image: [图片文件]
 {
   "success": true,
   "response": "根据图像分析...",
-  "has_image": true
+  "has_image": true,
+  "session_id": "uuid-string"
+}
+```
+
+### 流式聊天（推荐）
+
+```http
+POST /api/chat_stream
+Content-Type: multipart/form-data
+
+prompt: "这张图片显示了什么病症？"
+image: [图片文件]
+session_id: [会话ID，可选]
+```
+
+SSE流式响应：
+```
+data: {"session_id": "uuid-string"}
+
+data: {"chunk": "根据"}
+
+data: {"chunk": "图像"}
+
+data: {"chunk": "分析..."}
+
+data: {"done": true}
+```
+
+**优势**：
+- ✨ 实时显示生成内容
+- 🚀 更好的用户体验
+- 💡 可以提前看到生成方向
+
+### 清除历史
+
+```http
+POST /api/clear_history
+Content-Type: application/json
+
+{
+  "session_id": "uuid-string"  // 可选，不提供则清除所有
 }
 ```
 
@@ -264,16 +309,24 @@ gunicorn -w 4 -b 0.0.0.0:5000 app:app
 
 ## 📝 开发计划
 
+### 已完成功能 ✅
+
+- [x] 实时生成流式输出
+- [x] 对话历史保存和加载（localStorage）
+- [x] 多会话管理
+- [x] 上下文记忆
+
 ### 即将添加的功能
 
-- [ ] 对话历史保存和加载
+- [ ] 停止生成按钮
+- [ ] Markdown格式渲染
+- [ ] 代码高亮显示
 - [ ] 多用户支持
 - [ ] 模型切换功能
 - [ ] 更多的生成参数控制
 - [ ] 导出对话记录
 - [ ] 语音输入支持
 - [ ] 更好的错误处理和提示
-- [ ] 实时生成流式输出
 - [ ] 多语言支持
 
 ### 代码改进

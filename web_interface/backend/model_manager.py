@@ -3,11 +3,12 @@
 """
 
 import torch
-from transformers import Qwen2_5_VLForConditionalGeneration, AutoProcessor, BitsAndBytesConfig
+from transformers import Qwen2_5_VLForConditionalGeneration, AutoProcessor, BitsAndBytesConfig, TextIteratorStreamer
 from qwen_vl_utils import process_vision_info
 import logging
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Generator
 import gc
+from threading import Thread
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -308,4 +309,136 @@ class ModelManager:
     def is_loaded(self) -> bool:
         """检查模型是否已加载"""
         return self.model is not None and self.processor is not None
+    
+    def generate_response_stream(
+        self,
+        prompt: str,
+        image_path: Optional[str] = None,
+        history: Optional[List[Dict[str, Any]]] = None,
+        generation_config: Optional[Dict[str, Any]] = None
+    ) -> Generator[str, None, None]:
+        """
+        生成回复（流式输出，支持对话历史）
+        
+        Args:
+            prompt: 用户输入的问题
+            image_path: 图片路径（可选）
+            history: 对话历史（可选）
+            generation_config: 生成配置（可选）
+            
+        Yields:
+            生成的文本片段
+        """
+        if self.model is None or self.processor is None:
+            yield "[错误] 模型未加载"
+            return
+        
+        try:
+            if history is None:
+                history = []
+            
+            logger.info(f"🤔 流式生成回复: {prompt[:50]}... (历史消息数: {len(history)})")
+            
+            # 构建消息列表，包含历史对话
+            messages = []
+            
+            # 添加历史消息
+            for hist in history:
+                role = hist.get('role')
+                content = hist.get('content')
+                
+                if role and content:
+                    # 历史消息只包含文本（图片不重复发送）
+                    messages.append({
+                        "role": role,
+                        "content": [{"type": "text", "text": content}]
+                    })
+            
+            # 添加当前用户消息
+            current_content = []
+            if image_path:
+                current_content.append({
+                    "type": "image",
+                    "image": image_path
+                })
+                logger.info(f"🖼️ 包含图片: {image_path}")
+            
+            current_content.append({"type": "text", "text": prompt})
+            
+            messages.append({
+                "role": "user",
+                "content": current_content
+            })
+            
+            logger.info(f"📝 消息总数: {len(messages)}")
+            
+            # 应用聊天模板
+            text = self.processor.apply_chat_template(
+                messages, 
+                tokenize=False, 
+                add_generation_prompt=True
+            )
+            
+            # 处理视觉信息（只处理当前消息）
+            image_inputs = None
+            video_inputs = None
+            if image_path:
+                # 只处理当前的图片消息
+                current_messages = [messages[-1]]
+                image_inputs, video_inputs = process_vision_info(current_messages)
+            
+            # 处理输入
+            inputs = self.processor(
+                text=[text],
+                images=image_inputs,
+                videos=video_inputs,
+                padding=True,
+                return_tensors="pt",
+            )
+            inputs = inputs.to(self.model.device)
+            
+            # 默认生成配置
+            default_config = {
+                "max_new_tokens": 512,
+                "temperature": 0.7,
+                "top_p": 0.9,
+                "do_sample": True,
+                "repetition_penalty": 1.1
+            }
+            
+            # 合并用户配置
+            if generation_config:
+                default_config.update(generation_config)
+            
+            # 创建流式输出器
+            streamer = TextIteratorStreamer(
+                self.processor.tokenizer,
+                skip_prompt=True,
+                skip_special_tokens=True
+            )
+            
+            # 添加streamer到生成配置
+            generation_kwargs = {
+                **inputs,
+                **default_config,
+                "streamer": streamer
+            }
+            
+            # 在单独的线程中生成
+            thread = Thread(target=self.model.generate, kwargs=generation_kwargs)
+            thread.start()
+            
+            # 流式输出生成的文本
+            for text_chunk in streamer:
+                yield text_chunk
+            
+            thread.join()
+            
+            logger.info("✅ 流式生成完成")
+            
+        except Exception as e:
+            logger.error(f"❌ 流式生成失败: {e}")
+            import traceback
+            traceback.print_exc()
+            yield f"[错误] {str(e)}"
 

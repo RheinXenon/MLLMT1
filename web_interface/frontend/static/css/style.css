@@ -603,6 +603,30 @@ body {
     }
 }
 
+/* 流式输出样式 */
+.message.streaming .streaming-text {
+    display: inline;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.streaming-cursor {
+    display: inline-block;
+    color: var(--primary-color);
+    animation: blink 1s infinite;
+    margin-left: 2px;
+    font-weight: bold;
+}
+
+@keyframes blink {
+    0%, 49% {
+        opacity: 1;
+    }
+    50%, 100% {
+        opacity: 0;
+    }
+}
+
 /* 输入区 */
 .chat-input-container {
     background: var(--surface-color);

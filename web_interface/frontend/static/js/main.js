@@ -370,7 +370,7 @@ function updateModelStatus(loaded) {
 }
 
 /**
- * 发送消息
+ * 发送消息（使用流式输出）
  */
 async function handleSendMessage() {
     const prompt = elements.chatInput.value.trim();
@@ -443,43 +443,79 @@ async function handleSendMessage() {
     elements.sendBtn.disabled = true;
     elements.chatInput.disabled = true;
     
-    // 添加思考中提示
-    const thinkingMsg = addThinkingMessage();
+    // 添加流式消息容器
+    const streamingMsg = addStreamingMessage();
+    let fullResponse = '';
     
     try {
-        // 发送请求
-        const result = await apiClient.chat(prompt, appState.currentImage, config, chat.sessionId);
-        
-        // 移除思考中提示
-        thinkingMsg.remove();
-        
-        if (result.success) {
-            // 保存会话ID
-            if (result.session_id) {
-                chat.sessionId = result.session_id;
+        // 发送流式请求
+        await apiClient.chatStream(
+            prompt, 
+            appState.currentImage, 
+            config, 
+            chat.sessionId,
+            // onChunk: 接收到文本块
+            (chunk) => {
+                fullResponse += chunk;
+                updateStreamingMessage(streamingMsg, fullResponse);
+            },
+            // onComplete: 完成
+            (sessionId) => {
+                // 保存会话ID
+                if (sessionId) {
+                    chat.sessionId = sessionId;
+                }
+                
+                // 完成流式显示
+                finalizeStreamingMessage(streamingMsg);
+                
+                // 添加到历史
+                chat.messages.push({
+                    role: 'assistant',
+                    content: fullResponse,
+                    timestamp: Date.now()
+                });
+                
+                // 更新聊天时间
+                chat.updatedAt = Date.now();
+                saveChatsToStorage();
+                updateChatList();
+                
+                // 清除图片
+                if (appState.currentImage) {
+                    handleRemoveImage();
+                }
+                
+                // 恢复输入
+                appState.isGenerating = false;
+                elements.sendBtn.disabled = false;
+                elements.chatInput.disabled = false;
+                elements.chatInput.focus();
+            },
+            // onError: 错误
+            (error) => {
+                console.error('流式生成失败:', error);
+                streamingMsg.remove();
+                showNotification('生成回复时出错: ' + error, 'error');
+                
+                // 清除图片
+                if (appState.currentImage) {
+                    handleRemoveImage();
+                }
+                
+                // 恢复输入
+                appState.isGenerating = false;
+                elements.sendBtn.disabled = false;
+                elements.chatInput.disabled = false;
+                elements.chatInput.focus();
             }
-            
-            // 添加助手回复
-            addMessageToDOM('assistant', result.response);
-            chat.messages.push({
-                role: 'assistant',
-                content: result.response,
-                timestamp: Date.now()
-            });
-            
-            // 更新聊天时间
-            chat.updatedAt = Date.now();
-            saveChatsToStorage();
-            updateChatList();
-        } else {
-            showNotification(result.error || '生成回复失败', 'error');
-        }
+        );
         
     } catch (error) {
         console.error('发送消息失败:', error);
-        thinkingMsg.remove();
+        streamingMsg.remove();
         showNotification('发送消息时出错: ' + error.message, 'error');
-    } finally {
+        
         // 清除图片
         if (appState.currentImage) {
             handleRemoveImage();
@@ -553,6 +589,77 @@ function addThinkingMessage() {
     scrollToBottom();
     
     return messageDiv;
+}
+
+/**
+ * 添加流式消息容器
+ */
+function addStreamingMessage() {
+    const messageDiv = document.createElement('div');
+    messageDiv.className = 'message assistant streaming';
+    
+    const messageContent = document.createElement('div');
+    messageContent.className = 'message-content';
+    
+    const textDiv = document.createElement('div');
+    textDiv.className = 'streaming-text';
+    textDiv.textContent = '';
+    
+    // 添加光标效果
+    const cursor = document.createElement('span');
+    cursor.className = 'streaming-cursor';
+    cursor.textContent = '▋';
+    textDiv.appendChild(cursor);
+    
+    messageContent.appendChild(textDiv);
+    messageDiv.appendChild(messageContent);
+    elements.chatMessages.appendChild(messageDiv);
+    
+    scrollToBottom();
+    
+    return messageDiv;
+}
+
+/**
+ * 更新流式消息内容
+ */
+function updateStreamingMessage(messageDiv, text) {
+    const textDiv = messageDiv.querySelector('.streaming-text');
+    if (textDiv) {
+        // 保留光标
+        const cursor = textDiv.querySelector('.streaming-cursor');
+        textDiv.textContent = text;
+        if (cursor) {
+            textDiv.appendChild(cursor);
+        }
+        scrollToBottom();
+    }
+}
+
+/**
+ * 完成流式消息（移除光标，添加时间戳）
+ */
+function finalizeStreamingMessage(messageDiv) {
+    // 移除streaming类
+    messageDiv.classList.remove('streaming');
+    
+    // 移除光标
+    const cursor = messageDiv.querySelector('.streaming-cursor');
+    if (cursor) {
+        cursor.remove();
+    }
+    
+    // 添加时间戳
+    const messageContent = messageDiv.querySelector('.message-content');
+    if (messageContent && !messageContent.querySelector('.message-time')) {
+        const timeDiv = document.createElement('div');
+        timeDiv.className = 'message-time';
+        timeDiv.textContent = new Date().toLocaleTimeString('zh-CN', { 
+            hour: '2-digit', 
+            minute: '2-digit' 
+        });
+        messageContent.appendChild(timeDiv);
+    }
 }
 
 /**

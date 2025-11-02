@@ -137,6 +137,91 @@ class APIClient {
         const data = sessionId ? { session_id: sessionId } : {};
         return await this.post('/api/clear_history', data);
     }
+
+    /**
+     * 发送流式聊天消息
+     * @param {string} prompt - 用户输入的文本
+     * @param {File|null} image - 图片文件（可选）
+     * @param {Object} config - 生成配置（可选）
+     * @param {string|null} sessionId - 会话ID（可选，用于上下文对话）
+     * @param {Function} onChunk - 接收文本块的回调函数
+     * @param {Function} onComplete - 完成时的回调函数
+     * @param {Function} onError - 错误时的回调函数
+     */
+    async chatStream(prompt, image = null, config = null, sessionId = null, onChunk, onComplete, onError) {
+        const formData = new FormData();
+        formData.append('prompt', prompt);
+        
+        if (image) {
+            formData.append('image', image);
+        }
+        
+        if (config) {
+            formData.append('config', JSON.stringify(config));
+        }
+        
+        if (sessionId) {
+            formData.append('session_id', sessionId);
+        }
+        
+        try {
+            const response = await fetch(`${this.baseURL}/api/chat_stream`, {
+                method: 'POST',
+                body: formData
+            });
+            
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            let returnSessionId = null;
+            
+            while (true) {
+                const { value, done } = await reader.read();
+                
+                if (done) {
+                    break;
+                }
+                
+                // 解码数据
+                buffer += decoder.decode(value, { stream: true });
+                
+                // 处理SSE消息
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || '';  // 保留最后一行（可能不完整）
+                
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        const dataStr = line.substring(6);
+                        try {
+                            const data = JSON.parse(dataStr);
+                            
+                            if (data.session_id) {
+                                returnSessionId = data.session_id;
+                            } else if (data.chunk) {
+                                onChunk(data.chunk);
+                            } else if (data.done) {
+                                onComplete(returnSessionId);
+                                return;
+                            } else if (data.error) {
+                                onError(data.error);
+                                return;
+                            }
+                        } catch (e) {
+                            console.error('解析SSE数据失败:', e, dataStr);
+                        }
+                    }
+                }
+            }
+            
+        } catch (error) {
+            console.error('流式请求失败:', error);
+            onError(error.message);
+        }
+    }
 }
 
 // 创建全局API客户端实例

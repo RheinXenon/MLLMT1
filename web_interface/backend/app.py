@@ -2,7 +2,7 @@
 Lingshu-7B Web 服务 - Flask应用主文件
 """
 
-from flask import Flask, request, jsonify, send_from_directory, session
+from flask import Flask, request, jsonify, send_from_directory, session, Response, stream_with_context
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 import os
@@ -11,6 +11,7 @@ import traceback
 from pathlib import Path
 import uuid
 from datetime import datetime
+import json
 
 from model_manager import ModelManager
 import config
@@ -242,6 +243,123 @@ def chat():
             "success": False,
             "error": str(e)
         }), 500
+
+
+@app.route('/api/chat_stream', methods=['POST'])
+def chat_stream():
+    """处理流式聊天请求（支持上下文记忆）"""
+    if not model_manager or not model_manager.is_loaded():
+        def error_gen():
+            yield f"data: {json.dumps({'error': '模型未加载，请先加载模型'})}\n\n"
+        return Response(stream_with_context(error_gen()), mimetype='text/event-stream')
+    
+    try:
+        # 获取或创建会话ID
+        session_id = request.form.get('session_id')
+        if not session_id:
+            session_id = str(uuid.uuid4())
+            logger.info(f"创建新会话: {session_id}")
+        
+        # 初始化会话历史
+        if session_id not in conversation_sessions:
+            conversation_sessions[session_id] = []
+            logger.info(f"初始化会话历史: {session_id}")
+        
+        # 获取请求数据
+        prompt = request.form.get('prompt', '').strip()
+        
+        if not prompt:
+            def error_gen():
+                yield f"data: {json.dumps({'error': '请输入问题'})}\n\n"
+            return Response(stream_with_context(error_gen()), mimetype='text/event-stream')
+        
+        # 处理图片（如果有）
+        image_path = None
+        if 'image' in request.files:
+            file = request.files['image']
+            if file and file.filename:
+                if allowed_file(file.filename):
+                    # 保存文件
+                    filename = secure_filename(file.filename)
+                    image_path = os.path.join(config.UPLOAD_FOLDER, filename)
+                    file.save(image_path)
+                    logger.info(f"保存图片: {image_path}")
+                else:
+                    def error_gen():
+                        yield f"data: {json.dumps({'error': '不支持的文件格式'})}\n\n"
+                    return Response(stream_with_context(error_gen()), mimetype='text/event-stream')
+        
+        # 获取会话历史
+        history = conversation_sessions[session_id]
+        
+        # 获取生成配置
+        config_str = request.form.get('config')
+        generation_config = json.loads(config_str) if config_str else config.GENERATION_CONFIG
+        
+        # 保存用户消息
+        user_message = {
+            "role": "user",
+            "content": prompt,
+            "has_image": image_path is not None,
+            "timestamp": datetime.now().isoformat()
+        }
+        conversation_sessions[session_id].append(user_message)
+        
+        logger.info(f"处理流式请求 [会话:{session_id[:8]}]: {prompt[:50]}... (图片: {image_path is not None}, 历史消息数: {len(history)})")
+        
+        def generate():
+            """生成器函数，用于流式输出"""
+            try:
+                # 发送会话ID
+                yield f"data: {json.dumps({'session_id': session_id})}\n\n"
+                
+                full_response = ""
+                
+                # 流式生成回复
+                for chunk in model_manager.generate_response_stream(
+                    prompt=prompt,
+                    image_path=image_path,
+                    history=history,
+                    generation_config=generation_config
+                ):
+                    full_response += chunk
+                    # 发送文本块
+                    yield f"data: {json.dumps({'chunk': chunk})}\n\n"
+                
+                # 发送完成信号
+                yield f"data: {json.dumps({'done': True})}\n\n"
+                
+                # 保存助手回复到历史
+                assistant_message = {
+                    "role": "assistant",
+                    "content": full_response,
+                    "timestamp": datetime.now().isoformat()
+                }
+                conversation_sessions[session_id].append(assistant_message)
+                
+                logger.info(f"流式对话已保存 [会话:{session_id[:8]}], 当前消息数: {len(conversation_sessions[session_id])}")
+                
+            except Exception as e:
+                logger.error(f"流式生成出错: {e}")
+                traceback.print_exc()
+                yield f"data: {json.dumps({'error': str(e)})}\n\n"
+            finally:
+                # 清理上传的临时图片
+                if image_path and os.path.exists(image_path):
+                    try:
+                        os.remove(image_path)
+                        logger.info(f"删除临时图片: {image_path}")
+                    except Exception as e:
+                        logger.warning(f"删除临时图片失败: {e}")
+        
+        return Response(stream_with_context(generate()), mimetype='text/event-stream')
+        
+    except Exception as e:
+        logger.error(f"处理流式聊天请求时出错: {e}")
+        traceback.print_exc()
+        def error_gen():
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+        return Response(stream_with_context(error_gen()), mimetype='text/event-stream')
 
 
 @app.route('/api/clear_history', methods=['POST'])
