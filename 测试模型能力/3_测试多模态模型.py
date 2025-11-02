@@ -200,7 +200,7 @@ def main():
     print("=" * 60)
     
     # 检查模型路径
-    model_path = "./models/Lingshu-7B"
+    model_path = "../models/Lingshu-7B"
     
     if not os.path.exists(model_path):
         print(f"\n❌ 错误: 未找到模型文件")
@@ -211,7 +211,7 @@ def main():
     print(f"\n✅ 找到模型: {os.path.abspath(model_path)}")
     
     # 设置默认图像路径
-    default_image_path = "./test_images/示例.jpg"
+    default_image_path = "../test_images/示例.jpg"
     
     # 检查默认图像是否存在
     if not os.path.exists(default_image_path):

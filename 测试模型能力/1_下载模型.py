@@ -17,7 +17,7 @@ def download_model():
     
     # 配置参数
     repo_id = "lingshu-medical-mllm/Lingshu-7B"
-    local_dir = "./models/Lingshu-7B"
+    local_dir = "../models/Lingshu-7B"
     
     print(f"模型仓库: {repo_id}")
     print(f"本地保存路径: {local_dir}")

@@ -180,7 +180,7 @@ def main():
     print("=" * 60)
     
     # 检查模型路径
-    model_path = "./models/Lingshu-7B"
+    model_path = "../models/Lingshu-7B"
     
     if not os.path.exists(model_path):
         print(f"\n❌ 错误: 未找到模型文件")
