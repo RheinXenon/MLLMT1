@@ -345,7 +345,15 @@ class ModelManager:
             处理后的图片路径
         """
         try:
+            # 检查文件是否存在
+            if not os.path.exists(image_path):
+                logger.warning(f"⚠️ 图片文件不存在: {image_path}")
+                return image_path
+            
             with Image.open(image_path) as img:
+                # 获取图片格式
+                img_format = img.format or 'JPEG'  # 默认使用JPEG格式
+                
                 # 获取原始尺寸
                 orig_width, orig_height = img.size
                 
@@ -367,8 +375,28 @@ class ModelManager:
                 
                 # 保存压缩后的图片
                 base, ext = os.path.splitext(image_path)
+                
+                # 如果没有扩展名，根据图片格式添加
+                if not ext:
+                    format_ext_map = {
+                        'PNG': '.png',
+                        'JPEG': '.jpg',
+                        'JPG': '.jpg',
+                        'GIF': '.gif',
+                        'BMP': '.bmp',
+                        'WEBP': '.webp'
+                    }
+                    ext = format_ext_map.get(img_format, '.jpg')  # 默认使用.jpg
+                    logger.info(f"🔍 检测到格式: {img_format}, 添加扩展名: {ext}")
+                
                 compressed_path = f"{base}_compressed{ext}"
-                img_resized.save(compressed_path, quality=95)
+                
+                # 根据格式保存，PNG不支持quality参数
+                if img_format == 'PNG':
+                    img_resized.save(compressed_path, format='PNG', optimize=True)
+                else:
+                    # JPEG等格式支持quality参数
+                    img_resized.save(compressed_path, format=img_format, quality=95)
                 
                 logger.info(f"🔄 图片已压缩: {orig_width}x{orig_height} → {new_width}x{new_height}")
                 logger.info(f"💾 压缩后路径: {compressed_path}")
@@ -377,6 +405,8 @@ class ModelManager:
                 
         except Exception as e:
             logger.error(f"❌ 图片预处理失败: {e}")
+            import traceback
+            logger.error(f"详细错误: {traceback.format_exc()}")
             return image_path  # 失败时返回原路径
     
     def clear_cuda_cache(self):
