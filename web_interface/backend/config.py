@@ -12,6 +12,10 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(BASE_DIR))
 MODEL_PATH = os.path.join(PROJECT_ROOT, "models", "Lingshu-7B")
 DEFAULT_QUANTIZATION = "4bit"  # 默认使用4bit量化
 
+# 显存优化配置 - 针对8GB显存优化
+MAX_PIXELS = 1003520  # 约100万像素 (原始1280万 -> 100万，减少约12倍显存占用)
+IMAGE_COMPRESSION_MAX_SIZE = 1024  # 图片预处理最大边长（像素）
+
 # 上传文件配置
 UPLOAD_FOLDER = os.path.join(PROJECT_ROOT, "web_interface", "uploads")
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'}
@@ -33,4 +37,3 @@ FLASK_DEBUG = True
 
 # 确保上传文件夹存在
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-

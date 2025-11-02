@@ -9,6 +9,8 @@ import logging
 from typing import Optional, Dict, Any, List, Generator
 import gc
 from threading import Thread
+from PIL import Image
+import os
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -18,16 +20,18 @@ logger = logging.getLogger(__name__)
 class ModelManager:
     """模型管理器类"""
     
-    def __init__(self, model_path: str, quantization: str = "4bit"):
+    def __init__(self, model_path: str, quantization: str = "4bit", max_pixels: int = 1003520):
         """
         初始化模型管理器
         
         Args:
             model_path: 模型路径
             quantization: 量化模式 (4bit, 8bit, standard, cpu)
+            max_pixels: 最大像素数，默认1003520(约100万像素，适合8GB显存)
         """
         self.model_path = model_path
         self.quantization = quantization
+        self.max_pixels = max_pixels
         self.model = None
         self.processor = None
         self.device = None
@@ -60,6 +64,12 @@ class ModelManager:
                 self.model_path, 
                 trust_remote_code=True
             )
+            
+            # 设置自定义的max_pixels以节省显存
+            if hasattr(self.processor, 'image_processor') and self.max_pixels:
+                self.processor.image_processor.max_pixels = self.max_pixels
+                logger.info(f"✅ 已设置 max_pixels = {self.max_pixels} (约{self.max_pixels/1e6:.1f}M像素)")
+                logger.info(f"💡 这可以减少显存占用，适合处理复杂图片")
             
             # 根据量化模式加载模型
             if self.quantization == "4bit":
@@ -323,6 +333,60 @@ class ModelManager:
         """检查模型是否已加载"""
         return self.model is not None and self.processor is not None
     
+    def preprocess_image(self, image_path: str, max_size: int = 1024) -> str:
+        """
+        预处理图片：压缩分辨率以节省显存
+        
+        Args:
+            image_path: 原始图片路径
+            max_size: 最大边长（像素）
+            
+        Returns:
+            处理后的图片路径
+        """
+        try:
+            with Image.open(image_path) as img:
+                # 获取原始尺寸
+                orig_width, orig_height = img.size
+                
+                # 如果图片不需要压缩，直接返回
+                if max(orig_width, orig_height) <= max_size:
+                    logger.info(f"📷 图片尺寸合适 {orig_width}x{orig_height}，无需压缩")
+                    return image_path
+                
+                # 计算新尺寸（保持宽高比）
+                if orig_width > orig_height:
+                    new_width = max_size
+                    new_height = int(orig_height * max_size / orig_width)
+                else:
+                    new_height = max_size
+                    new_width = int(orig_width * max_size / orig_height)
+                
+                # 压缩图片
+                img_resized = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                
+                # 保存压缩后的图片
+                base, ext = os.path.splitext(image_path)
+                compressed_path = f"{base}_compressed{ext}"
+                img_resized.save(compressed_path, quality=95)
+                
+                logger.info(f"🔄 图片已压缩: {orig_width}x{orig_height} → {new_width}x{new_height}")
+                logger.info(f"💾 压缩后路径: {compressed_path}")
+                
+                return compressed_path
+                
+        except Exception as e:
+            logger.error(f"❌ 图片预处理失败: {e}")
+            return image_path  # 失败时返回原路径
+    
+    def clear_cuda_cache(self):
+        """清理CUDA缓存"""
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+            gc.collect()
+            logger.info("🧹 已清理CUDA缓存")
+    
     def generate_response_stream(
         self,
         prompt: str,
@@ -354,6 +418,19 @@ class ModelManager:
                 image_paths = []
             
             logger.info(f"🤔 流式生成回复: {prompt[:50]}... (图片数: {len(image_paths)}, 历史消息数: {len(history)})")
+            
+            # 预处理图片（压缩以节省显存）
+            processed_image_paths = []
+            if image_paths and len(image_paths) > 0:
+                logger.info("🖼️ 开始预处理图片...")
+                for img_path in image_paths:
+                    processed_path = self.preprocess_image(img_path, max_size=1024)
+                    processed_image_paths.append(processed_path)
+            else:
+                processed_image_paths = image_paths
+            
+            # 清理CUDA缓存
+            self.clear_cuda_cache()
             
             # 构建消息列表，包含历史对话
             messages = []

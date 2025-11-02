@@ -112,11 +112,13 @@ def load_model():
                 "error": f"模型路径不存在: {config.MODEL_PATH}"
             }), 404
         
-        # 创建模型管理器
+        # 创建模型管理器（包含显存优化配置）
         logger.info(f"开始加载模型: {config.MODEL_PATH}")
+        logger.info(f"显存优化配置 - max_pixels: {config.MAX_PIXELS}, 图片压缩尺寸: {config.IMAGE_COMPRESSION_MAX_SIZE}")
         model_manager = ModelManager(
             model_path=config.MODEL_PATH,
-            quantization=config.DEFAULT_QUANTIZATION
+            quantization=config.DEFAULT_QUANTIZATION,
+            max_pixels=config.MAX_PIXELS
         )
         
         # 加载模型
@@ -474,6 +476,8 @@ if __name__ == '__main__':
     logger.info("=" * 60)
     logger.info(f"模型路径: {config.MODEL_PATH}")
     logger.info(f"量化模式: {config.DEFAULT_QUANTIZATION}")
+    logger.info(f"显存优化 - 最大像素: {config.MAX_PIXELS} (约{config.MAX_PIXELS/1e6:.1f}M)")
+    logger.info(f"显存优化 - 图片压缩: {config.IMAGE_COMPRESSION_MAX_SIZE}px")
     logger.info(f"上传文件夹: {config.UPLOAD_FOLDER}")
     logger.info(f"服务地址: http://{config.FLASK_HOST}:{config.FLASK_PORT}")
     logger.info("=" * 60)
