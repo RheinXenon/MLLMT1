@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>设置 - Lingshu-7B</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="container settings-page">
+        <!-- 侧边栏 -->
+        <aside class="sidebar">
+            <div class="logo">
+                <h1>🏥 Lingshu-7B</h1>
+                <p class="subtitle">设置中心</p>
+            </div>
+
+            <div class="settings-nav">
+                <a href="/" class="nav-item">
+                    <span class="nav-icon">💬</span>
+                    <span>返回聊天</span>
+                </a>
+            </div>
+        </aside>
+
+        <!-- 主内容区 -->
+        <main class="main-content settings-content">
+            <div class="chat-header">
+                <h2>⚙️ 模型设置</h2>
+            </div>
+
+            <div class="settings-panels">
+                <!-- 模型状态 -->
+                <div class="settings-panel">
+                    <h3>📊 模型状态</h3>
+                    <div class="status-grid">
+                        <div class="status-card">
+                            <span class="status-label">服务状态</span>
+                            <span class="status-value" id="service-status">检查中...</span>
+                        </div>
+                        <div class="status-card">
+                            <span class="status-label">模型状态</span>
+                            <span class="status-value" id="model-status">未加载</span>
+                        </div>
+                        <div class="status-card">
+                            <span class="status-label">量化模式</span>
+                            <span class="status-value" id="quantization-mode">4bit</span>
+                        </div>
+                        <div class="status-card gpu-info hidden" id="gpu-info">
+                            <span class="status-label">GPU</span>
+                            <span class="status-value" id="gpu-name">-</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 模型控制 -->
+                <div class="settings-panel">
+                    <h3>🚀 模型控制</h3>
+                    <div class="button-group">
+                        <button id="load-model-btn" class="btn btn-primary btn-large">
+                            <span class="btn-icon">🚀</span>
+                            加载模型
+                        </button>
+                        <button id="unload-model-btn" class="btn btn-secondary btn-large" disabled>
+                            <span class="btn-icon">💤</span>
+                            卸载模型
+                        </button>
+                    </div>
+                    <p class="setting-hint">⚠️ 首次加载模型可能需要几分钟时间，请耐心等待</p>
+                </div>
+
+                <!-- 生成参数设置 -->
+                <div class="settings-panel">
+                    <h3>🎛️ 生成参数</h3>
+                    <div class="settings-form">
+                        <div class="setting-item">
+                            <div class="setting-header">
+                                <label for="temperature">温度 (Temperature)</label>
+                                <span class="setting-value" id="temperature-value">0.7</span>
+                            </div>
+                            <input type="range" id="temperature" min="0.1" max="1.5" step="0.1" value="0.7">
+                            <p class="setting-description">较低的温度使输出更确定，较高的温度使输出更随机</p>
+                        </div>
+
+                        <div class="setting-item">
+                            <div class="setting-header">
+                                <label for="max-tokens">最大Token数</label>
+                                <span class="setting-value" id="max-tokens-value">512</span>
+                            </div>
+                            <input type="range" id="max-tokens" min="128" max="2048" step="128" value="512">
+                            <p class="setting-description">控制模型生成的最大文本长度</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 使用说明 -->
+                <div class="settings-panel">
+                    <h3>📖 使用说明</h3>
+                    <div class="info-grid">
+                        <div class="info-item">
+                            <span class="info-icon">📝</span>
+                            <div class="info-content">
+                                <h4>医学问答</h4>
+                                <p>输入医学相关问题，获得专业的答复</p>
+                            </div>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-icon">🖼️</span>
+                            <div class="info-content">
+                                <h4>图像分析</h4>
+                                <p>上传医学图像进行诊断分析</p>
+                            </div>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-icon">🤖</span>
+                            <div class="info-content">
+                                <h4>4bit量化</h4>
+                                <p>显存友好，支持在消费级显卡上运行</p>
+                            </div>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-icon">⚡</span>
+                            <div class="info-content">
+                                <h4>多轮对话</h4>
+                                <p>支持上下文记忆的连续对话</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Loading遮罩 -->
+    <div class="loading-overlay" id="loading-overlay">
+        <div class="loading-spinner"></div>
+        <p id="loading-text">加载中...</p>
+    </div>
+
+    <script src="/static/js/api.js"></script>
+    <script src="/static/js/settings.js"></script>
+</body>
+</html>
+

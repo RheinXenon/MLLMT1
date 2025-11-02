@@ -1,29 +1,27 @@
 /**
- * 主应用逻辑
+ * 主应用逻辑 - 多聊天会话管理版本
  */
 
 // 应用状态
 const appState = {
     modelLoaded: false,
     currentImage: null,
-    chatHistory: [],
     isGenerating: false,
-    sessionId: null  // 会话ID，用于记忆上下文对话
+    currentChatId: null,  // 当前聊天ID
+    chats: {},  // 所有聊天会话 { chatId: { id, title, messages, sessionId, createdAt, updatedAt } }
 };
 
 // DOM元素
 const elements = {
     // 状态显示
-    serviceStatus: document.getElementById('service-status'),
-    modelStatus: document.getElementById('model-status'),
-    quantizationMode: document.getElementById('quantization-mode'),
-    gpuInfo: document.getElementById('gpu-info'),
-    gpuName: document.getElementById('gpu-name'),
+    modelStatusMini: document.getElementById('model-status-mini'),
     
     // 按钮
-    loadModelBtn: document.getElementById('load-model-btn'),
-    unloadModelBtn: document.getElementById('unload-model-btn'),
+    newChatBtn: document.getElementById('new-chat-btn'),
+    settingsBtn: document.getElementById('settings-btn'),
     clearChatBtn: document.getElementById('clear-chat-btn'),
+    deleteChatBtn: document.getElementById('delete-chat-btn'),
+    renameChatBtn: document.getElementById('rename-chat-btn'),
     sendBtn: document.getElementById('send-btn'),
     uploadBtn: document.getElementById('upload-btn'),
     removeImageBtn: document.getElementById('remove-image-btn'),
@@ -31,13 +29,11 @@ const elements = {
     // 输入
     chatInput: document.getElementById('chat-input'),
     imageInput: document.getElementById('image-input'),
-    temperatureInput: document.getElementById('temperature'),
-    temperatureValue: document.getElementById('temperature-value'),
-    maxTokensInput: document.getElementById('max-tokens'),
-    maxTokensValue: document.getElementById('max-tokens-value'),
+    chatTitle: document.getElementById('chat-title'),
     
     // 显示区域
     chatMessages: document.getElementById('chat-messages'),
+    chatList: document.getElementById('chat-list'),
     imagePreview: document.getElementById('image-preview'),
     previewImg: document.getElementById('preview-img'),
     loadingOverlay: document.getElementById('loading-overlay'),
@@ -50,11 +46,25 @@ const elements = {
 async function initApp() {
     console.log('初始化应用...');
     
+    // 从localStorage加载聊天历史
+    loadChatsFromStorage();
+    
     // 绑定事件监听器
     bindEventListeners();
     
     // 检查服务状态
     await checkStatus();
+    
+    // 如果没有聊天，创建一个新聊天
+    if (Object.keys(appState.chats).length === 0) {
+        createNewChat();
+    } else {
+        // 加载最后一个聊天
+        const chatIds = Object.keys(appState.chats).sort((a, b) => 
+            appState.chats[b].updatedAt - appState.chats[a].updatedAt
+        );
+        switchToChat(chatIds[0]);
+    }
     
     // 自动调整输入框高度
     autoResizeTextarea();
@@ -64,13 +74,13 @@ async function initApp() {
  * 绑定事件监听器
  */
 function bindEventListeners() {
-    // 模型控制按钮
-    elements.loadModelBtn.addEventListener('click', handleLoadModel);
-    elements.unloadModelBtn.addEventListener('click', handleUnloadModel);
-    
     // 聊天控制
+    elements.newChatBtn.addEventListener('click', createNewChat);
+    elements.settingsBtn.addEventListener('click', () => window.location.href = '/settings.html');
     elements.sendBtn.addEventListener('click', handleSendMessage);
     elements.clearChatBtn.addEventListener('click', handleClearChat);
+    elements.deleteChatBtn.addEventListener('click', handleDeleteChat);
+    elements.renameChatBtn.addEventListener('click', handleRenameChat);
     elements.chatInput.addEventListener('keydown', handleInputKeydown);
     elements.chatInput.addEventListener('input', handleInputChange);
     
@@ -78,14 +88,235 @@ function bindEventListeners() {
     elements.uploadBtn.addEventListener('click', () => elements.imageInput.click());
     elements.imageInput.addEventListener('change', handleImageSelect);
     elements.removeImageBtn.addEventListener('click', handleRemoveImage);
+}
+
+/**
+ * 从localStorage加载聊天历史
+ */
+function loadChatsFromStorage() {
+    try {
+        const stored = localStorage.getItem('chats');
+        if (stored) {
+            appState.chats = JSON.parse(stored);
+            console.log('加载了', Object.keys(appState.chats).length, '个聊天记录');
+        }
+    } catch (error) {
+        console.error('加载聊天历史失败:', error);
+        appState.chats = {};
+    }
+}
+
+/**
+ * 保存聊天历史到localStorage
+ */
+function saveChatsToStorage() {
+    try {
+        localStorage.setItem('chats', JSON.stringify(appState.chats));
+    } catch (error) {
+        console.error('保存聊天历史失败:', error);
+    }
+}
+
+/**
+ * 创建新聊天
+ */
+function createNewChat() {
+    const chatId = 'chat_' + Date.now();
+    const chat = {
+        id: chatId,
+        title: '新对话',
+        messages: [],
+        sessionId: null,
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+    };
     
-    // 设置滑块
-    elements.temperatureInput.addEventListener('input', (e) => {
-        elements.temperatureValue.textContent = e.target.value;
+    appState.chats[chatId] = chat;
+    saveChatsToStorage();
+    
+    switchToChat(chatId);
+    updateChatList();
+}
+
+/**
+ * 切换到指定聊天
+ */
+function switchToChat(chatId) {
+    if (!appState.chats[chatId]) {
+        console.error('聊天不存在:', chatId);
+        return;
+    }
+    
+    appState.currentChatId = chatId;
+    const chat = appState.chats[chatId];
+    
+    // 更新标题
+    elements.chatTitle.textContent = '💬 ' + chat.title;
+    
+    // 清空消息区域并重新渲染
+    elements.chatMessages.innerHTML = '';
+    
+    if (chat.messages.length === 0) {
+        // 显示欢迎消息
+        elements.chatMessages.innerHTML = `
+            <div class="welcome-message">
+                <h2>👋 欢迎使用 Lingshu-7B 医学助手</h2>
+                <p>这是一个基于Qwen2.5-VL的医学多模态对话系统</p>
+                <div class="welcome-features">
+                    <div class="feature">
+                        <span class="feature-icon">💡</span>
+                        <h3>智能对话</h3>
+                        <p>专业的医学知识问答</p>
+                    </div>
+                    <div class="feature">
+                        <span class="feature-icon">🖼️</span>
+                        <h3>图像分析</h3>
+                        <p>支持医学图像的诊断分析</p>
+                    </div>
+                    <div class="feature">
+                        <span class="feature-icon">⚡</span>
+                        <h3>高效运行</h3>
+                        <p>4bit量化，低显存占用</p>
+                    </div>
+                </div>
+                <p class="welcome-hint">请先前往设置页面加载模型，然后开始对话</p>
+            </div>
+        `;
+    } else {
+        // 渲染历史消息
+        chat.messages.forEach(msg => {
+            addMessageToDOM(msg.role, msg.content, msg.imageUrl);
+        });
+    }
+    
+    updateChatList();
+}
+
+/**
+ * 更新聊天列表显示
+ */
+function updateChatList() {
+    elements.chatList.innerHTML = '';
+    
+    // 按更新时间排序
+    const sortedChats = Object.values(appState.chats).sort((a, b) => 
+        b.updatedAt - a.updatedAt
+    );
+    
+    if (sortedChats.length === 0) {
+        elements.chatList.innerHTML = '<p style="text-align: center; color: var(--text-muted); font-size: 0.875rem; padding: var(--spacing-md);">暂无历史对话</p>';
+        return;
+    }
+    
+    sortedChats.forEach(chat => {
+        const chatItem = document.createElement('div');
+        chatItem.className = 'chat-item';
+        if (chat.id === appState.currentChatId) {
+            chatItem.classList.add('active');
+        }
+        
+        // 获取最后一条消息作为预览
+        let preview = '开始新对话...';
+        if (chat.messages.length > 0) {
+            const lastMsg = chat.messages[chat.messages.length - 1];
+            preview = lastMsg.content.substring(0, 30) + (lastMsg.content.length > 30 ? '...' : '');
+        }
+        
+        // 格式化时间
+        const timeStr = formatTime(chat.updatedAt);
+        
+        chatItem.innerHTML = `
+            <div class="chat-item-title">${chat.title}</div>
+            <div class="chat-item-preview">${preview}</div>
+            <div class="chat-item-time">${timeStr}</div>
+        `;
+        
+        chatItem.addEventListener('click', () => switchToChat(chat.id));
+        elements.chatList.appendChild(chatItem);
     });
-    elements.maxTokensInput.addEventListener('input', (e) => {
-        elements.maxTokensValue.textContent = e.target.value;
-    });
+}
+
+/**
+ * 格式化时间
+ */
+function formatTime(timestamp) {
+    const now = Date.now();
+    const diff = now - timestamp;
+    
+    // 小于1分钟
+    if (diff < 60 * 1000) {
+        return '刚刚';
+    }
+    // 小于1小时
+    if (diff < 60 * 60 * 1000) {
+        return Math.floor(diff / (60 * 1000)) + '分钟前';
+    }
+    // 小于1天
+    if (diff < 24 * 60 * 60 * 1000) {
+        return Math.floor(diff / (60 * 60 * 1000)) + '小时前';
+    }
+    // 小于7天
+    if (diff < 7 * 24 * 60 * 60 * 1000) {
+        return Math.floor(diff / (24 * 60 * 60 * 1000)) + '天前';
+    }
+    // 显示日期
+    const date = new Date(timestamp);
+    return `${date.getMonth() + 1}月${date.getDate()}日`;
+}
+
+/**
+ * 重命名当前聊天
+ */
+function handleRenameChat() {
+    if (!appState.currentChatId) return;
+    
+    const chat = appState.chats[appState.currentChatId];
+    const newTitle = prompt('请输入新的对话标题:', chat.title);
+    
+    if (newTitle && newTitle.trim()) {
+        chat.title = newTitle.trim();
+        chat.updatedAt = Date.now();
+        saveChatsToStorage();
+        
+        elements.chatTitle.textContent = '💬 ' + chat.title;
+        updateChatList();
+    }
+}
+
+/**
+ * 删除当前聊天
+ */
+async function handleDeleteChat() {
+    if (!appState.currentChatId) return;
+    
+    const chat = appState.chats[appState.currentChatId];
+    
+    if (!confirm(`确定要删除对话"${chat.title}"吗？`)) {
+        return;
+    }
+    
+    // 清除服务器端会话
+    if (chat.sessionId) {
+        try {
+            await apiClient.clearHistory(chat.sessionId);
+        } catch (error) {
+            console.error('清除服务器会话失败:', error);
+        }
+    }
+    
+    // 删除聊天
+    delete appState.chats[appState.currentChatId];
+    saveChatsToStorage();
+    
+    // 切换到其他聊天或创建新聊天
+    const chatIds = Object.keys(appState.chats);
+    if (chatIds.length > 0) {
+        switchToChat(chatIds[0]);
+    } else {
+        createNewChat();
+    }
+    
+    showNotification('对话已删除', 'success');
 }
 
 /**
@@ -94,31 +325,10 @@ function bindEventListeners() {
 async function checkStatus() {
     try {
         const status = await apiClient.getStatus();
-        
-        // 更新状态显示
-        elements.serviceStatus.textContent = '✅ 运行中';
-        elements.serviceStatus.style.color = '#10b981';
-        
-        if (status.model_loaded) {
-            updateModelStatus(true);
-            if (status.quantization) {
-                elements.quantizationMode.textContent = status.quantization;
-            }
-            
-            // 显示GPU信息
-            if (status.gpu_available) {
-                elements.gpuInfo.style.display = 'block';
-                elements.gpuName.textContent = status.gpu_name;
-            }
-        } else {
-            updateModelStatus(false);
-        }
-        
+        updateModelStatus(status.model_loaded);
     } catch (error) {
         console.error('检查状态失败:', error);
-        elements.serviceStatus.textContent = '❌ 连接失败';
-        elements.serviceStatus.style.color = '#ef4444';
-        showNotification('无法连接到服务器，请检查后端是否启动', 'error');
+        updateModelStatus(false);
     }
 }
 
@@ -129,65 +339,15 @@ function updateModelStatus(loaded) {
     appState.modelLoaded = loaded;
     
     if (loaded) {
-        elements.modelStatus.textContent = '✅ 已加载';
-        elements.modelStatus.style.color = '#10b981';
-        elements.loadModelBtn.disabled = true;
-        elements.unloadModelBtn.disabled = false;
+        elements.modelStatusMini.textContent = '✅ 已加载';
+        elements.modelStatusMini.style.color = '#10b981';
         elements.chatInput.disabled = false;
         elements.sendBtn.disabled = false;
     } else {
-        elements.modelStatus.textContent = '⚪ 未加载';
-        elements.modelStatus.style.color = '#64748b';
-        elements.loadModelBtn.disabled = false;
-        elements.unloadModelBtn.disabled = true;
+        elements.modelStatusMini.textContent = '⚪ 未加载';
+        elements.modelStatusMini.style.color = '#64748b';
         elements.chatInput.disabled = true;
         elements.sendBtn.disabled = true;
-    }
-}
-
-/**
- * 加载模型
- */
-async function handleLoadModel() {
-    showLoading('正在加载模型，请稍候...');
-    
-    try {
-        const result = await apiClient.loadModel();
-        
-        if (result.success) {
-            updateModelStatus(true);
-            showNotification('模型加载成功！', 'success');
-        } else {
-            showNotification(result.error || '模型加载失败', 'error');
-        }
-    } catch (error) {
-        console.error('加载模型失败:', error);
-        showNotification('加载模型时出错: ' + error.message, 'error');
-    } finally {
-        hideLoading();
-    }
-}
-
-/**
- * 卸载模型
- */
-async function handleUnloadModel() {
-    showLoading('正在卸载模型...');
-    
-    try {
-        const result = await apiClient.unloadModel();
-        
-        if (result.success) {
-            updateModelStatus(false);
-            showNotification('模型已卸载', 'success');
-        } else {
-            showNotification(result.error || '卸载模型失败', 'error');
-        }
-    } catch (error) {
-        console.error('卸载模型失败:', error);
-        showNotification('卸载模型时出错: ' + error.message, 'error');
-    } finally {
-        hideLoading();
     }
 }
 
@@ -203,7 +363,7 @@ async function handleSendMessage() {
     }
     
     if (!appState.modelLoaded) {
-        showNotification('请先加载模型', 'warning');
+        showNotification('请先前往设置页面加载模型', 'warning');
         return;
     }
     
@@ -211,23 +371,53 @@ async function handleSendMessage() {
         return;
     }
     
+    if (!appState.currentChatId) {
+        createNewChat();
+    }
+    
+    const chat = appState.chats[appState.currentChatId];
+    
     // 清空欢迎消息
     const welcomeMessage = elements.chatMessages.querySelector('.welcome-message');
     if (welcomeMessage) {
         welcomeMessage.remove();
     }
     
-    // 添加用户消息
-    addMessage('user', prompt, appState.currentImage);
+    // 保存图片URL（如果有）
+    let imageUrl = null;
+    if (appState.currentImage) {
+        imageUrl = URL.createObjectURL(appState.currentImage);
+    }
+    
+    // 添加用户消息到DOM和历史
+    addMessageToDOM('user', prompt, imageUrl);
+    chat.messages.push({
+        role: 'user',
+        content: prompt,
+        imageUrl: imageUrl,
+        timestamp: Date.now()
+    });
+    
+    // 如果是第一条消息，自动设置标题
+    if (chat.messages.length === 1) {
+        chat.title = prompt.substring(0, 20) + (prompt.length > 20 ? '...' : '');
+        elements.chatTitle.textContent = '💬 ' + chat.title;
+    }
+    
+    // 更新聊天时间
+    chat.updatedAt = Date.now();
+    saveChatsToStorage();
+    updateChatList();
     
     // 清空输入
     elements.chatInput.value = '';
     elements.chatInput.style.height = 'auto';
     
     // 获取生成配置
+    const settings = JSON.parse(localStorage.getItem('generationSettings') || '{}');
     const config = {
-        temperature: parseFloat(elements.temperatureInput.value),
-        max_new_tokens: parseInt(elements.maxTokensInput.value)
+        temperature: settings.temperature || 0.7,
+        max_new_tokens: settings.maxTokens || 512
     };
     
     // 禁用输入
@@ -239,20 +429,30 @@ async function handleSendMessage() {
     const thinkingMsg = addThinkingMessage();
     
     try {
-        // 发送请求（包含会话ID以支持上下文对话）
-        const result = await apiClient.chat(prompt, appState.currentImage, config, appState.sessionId);
+        // 发送请求
+        const result = await apiClient.chat(prompt, appState.currentImage, config, chat.sessionId);
         
         // 移除思考中提示
         thinkingMsg.remove();
         
         if (result.success) {
-            // 保存会话ID（后端返回）
+            // 保存会话ID
             if (result.session_id) {
-                appState.sessionId = result.session_id;
+                chat.sessionId = result.session_id;
             }
             
             // 添加助手回复
-            addMessage('assistant', result.response);
+            addMessageToDOM('assistant', result.response);
+            chat.messages.push({
+                role: 'assistant',
+                content: result.response,
+                timestamp: Date.now()
+            });
+            
+            // 更新聊天时间
+            chat.updatedAt = Date.now();
+            saveChatsToStorage();
+            updateChatList();
         } else {
             showNotification(result.error || '生成回复失败', 'error');
         }
@@ -276,9 +476,9 @@ async function handleSendMessage() {
 }
 
 /**
- * 添加消息到聊天区
+ * 添加消息到DOM
  */
-function addMessage(role, content, imageFile = null) {
+function addMessageToDOM(role, content, imageUrl = null) {
     const messageDiv = document.createElement('div');
     messageDiv.className = `message ${role}`;
     
@@ -286,10 +486,10 @@ function addMessage(role, content, imageFile = null) {
     messageContent.className = 'message-content';
     
     // 如果是用户消息且有图片，显示图片
-    if (role === 'user' && imageFile) {
+    if (role === 'user' && imageUrl) {
         const img = document.createElement('img');
         img.className = 'message-image';
-        img.src = URL.createObjectURL(imageFile);
+        img.src = imageUrl;
         messageContent.appendChild(img);
     }
     
@@ -312,9 +512,6 @@ function addMessage(role, content, imageFile = null) {
     
     // 滚动到底部
     scrollToBottom();
-    
-    // 保存到历史
-    appState.chatHistory.push({ role, content, timestamp: Date.now() });
 }
 
 /**
@@ -341,34 +538,40 @@ function addThinkingMessage() {
 }
 
 /**
- * 清空聊天
+ * 清空当前聊天
  */
 async function handleClearChat() {
-    if (appState.chatHistory.length === 0 && !appState.sessionId) {
+    if (!appState.currentChatId) return;
+    
+    const chat = appState.chats[appState.currentChatId];
+    
+    if (chat.messages.length === 0) {
         return;
     }
     
-    if (confirm('确定要清空所有对话吗？这将清除对话的上下文记忆。')) {
-        try {
-            // 清除服务器端的对话历史
-            if (appState.sessionId) {
-                await apiClient.clearHistory(appState.sessionId);
-                appState.sessionId = null;  // 重置会话ID
-            }
-            
-            // 清除前端显示
-            elements.chatMessages.innerHTML = `
-                <div class="welcome-message">
-                    <h2>👋 欢迎使用 Lingshu-7B 医学助手</h2>
-                    <p>对话已清空，可以开始新的对话</p>
-                </div>
-            `;
-            appState.chatHistory = [];
-            showNotification('对话历史已清空（包括上下文记忆）', 'success');
-        } catch (error) {
-            console.error('清除对话失败:', error);
-            showNotification('清除对话时出错: ' + error.message, 'error');
+    if (!confirm('确定要清空当前对话吗？')) {
+        return;
+    }
+    
+    try {
+        // 清除服务器端的对话历史
+        if (chat.sessionId) {
+            await apiClient.clearHistory(chat.sessionId);
+            chat.sessionId = null;
         }
+        
+        // 清除消息
+        chat.messages = [];
+        chat.updatedAt = Date.now();
+        saveChatsToStorage();
+        
+        // 重新渲染
+        switchToChat(appState.currentChatId);
+        
+        showNotification('对话已清空', 'success');
+    } catch (error) {
+        console.error('清除对话失败:', error);
+        showNotification('清除对话时出错: ' + error.message, 'error');
     }
 }
 
@@ -398,7 +601,7 @@ function handleImageSelect(e) {
     const reader = new FileReader();
     reader.onload = (e) => {
         elements.previewImg.src = e.target.result;
-        elements.imagePreview.style.display = 'block';
+        elements.imagePreview.classList.remove('hidden');
     };
     reader.readAsDataURL(file);
     
@@ -410,7 +613,7 @@ function handleImageSelect(e) {
  */
 function handleRemoveImage() {
     appState.currentImage = null;
-    elements.imagePreview.style.display = 'none';
+    elements.imagePreview.classList.add('hidden');
     elements.previewImg.src = '';
     elements.imageInput.value = '';
 }
@@ -468,11 +671,9 @@ function hideLoading() {
 }
 
 /**
- * 显示通知（简单的alert实现，可以替换为更好的通知组件）
+ * 显示通知
  */
 function showNotification(message, type = 'info') {
-    // 这里使用简单的console和alert
-    // 在实际项目中可以使用更好的通知库如 toastr、sweetalert 等
     console.log(`[${type.toUpperCase()}] ${message}`);
     
     if (type === 'error') {
@@ -480,9 +681,7 @@ function showNotification(message, type = 'info') {
     } else if (type === 'warning') {
         console.warn(message);
     }
-    // success 和 info 类型只在控制台显示
 }
 
 // 页面加载完成后初始化
 document.addEventListener('DOMContentLoaded', initApp);
-

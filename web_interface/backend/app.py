@@ -60,6 +60,12 @@ def index():
     return send_from_directory(FRONTEND_DIR, 'index.html')
 
 
+@app.route('/settings.html')
+def settings():
+    """设置页面"""
+    return send_from_directory(FRONTEND_DIR, 'settings.html')
+
+
 @app.route('/api/status', methods=['GET'])
 def get_status():
     """获取服务状态"""

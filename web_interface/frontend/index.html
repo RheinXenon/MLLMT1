@@ -16,70 +16,51 @@
                 <p class="subtitle">医学多模态对话助手</p>
             </div>
 
-            <div class="model-status">
-                <h3>模型状态</h3>
-                <div class="status-item">
-                    <span class="status-label">服务状态：</span>
-                    <span class="status-value" id="service-status">检查中...</span>
-                </div>
-                <div class="status-item">
-                    <span class="status-label">模型状态：</span>
-                    <span class="status-value" id="model-status">未加载</span>
-                </div>
-                <div class="status-item">
-                    <span class="status-label">量化模式：</span>
-                    <span class="status-value" id="quantization-mode">4bit</span>
-                </div>
-                <div class="status-item gpu-info" id="gpu-info" style="display: none;">
-                    <span class="status-label">GPU：</span>
-                    <span class="status-value" id="gpu-name">-</span>
-                </div>
-            </div>
-
-            <div class="model-controls">
-                <button id="load-model-btn" class="btn btn-primary">
-                    <span class="btn-icon">🚀</span>
-                    加载模型
+            <!-- 新建聊天按钮 -->
+            <div class="chat-controls">
+                <button id="new-chat-btn" class="btn btn-primary btn-new-chat">
+                    <span class="btn-icon">➕</span>
+                    创建新聊天
                 </button>
-                <button id="unload-model-btn" class="btn btn-secondary" disabled>
-                    <span class="btn-icon">💤</span>
-                    卸载模型
+                <button id="settings-btn" class="btn btn-secondary btn-settings" title="设置">
+                    <span class="btn-icon">⚙️</span>
                 </button>
             </div>
 
-            <div class="settings">
-                <h3>生成设置</h3>
-                <div class="setting-item">
-                    <label for="temperature">温度 (Temperature)</label>
-                    <input type="range" id="temperature" min="0.1" max="1.5" step="0.1" value="0.7">
-                    <span class="setting-value" id="temperature-value">0.7</span>
-                </div>
-                <div class="setting-item">
-                    <label for="max-tokens">最大Token数</label>
-                    <input type="range" id="max-tokens" min="128" max="2048" step="128" value="512">
-                    <span class="setting-value" id="max-tokens-value">512</span>
+            <!-- 历史聊天列表 -->
+            <div class="chat-history">
+                <h3>历史对话</h3>
+                <div class="chat-list" id="chat-list">
+                    <!-- 动态加载聊天记录 -->
                 </div>
             </div>
 
-            <div class="info">
-                <h3>使用说明</h3>
-                <ul>
-                    <li>📝 输入医学相关问题</li>
-                    <li>🖼️ 可上传医学图像进行分析</li>
-                    <li>🤖 基于4bit量化，显存友好</li>
-                    <li>⚡ 支持多轮对话</li>
-                </ul>
+            <!-- 模型状态简要显示 -->
+            <div class="sidebar-footer">
+                <div class="status-mini">
+                    <span class="status-label">模型：</span>
+                    <span class="status-value" id="model-status-mini">未加载</span>
+                </div>
             </div>
         </aside>
 
         <!-- 主内容区 -->
         <main class="main-content">
             <div class="chat-header">
-                <h2>💬 对话区</h2>
-                <button id="clear-chat-btn" class="btn btn-text">
-                    <span class="btn-icon">🗑️</span>
-                    清空对话
-                </button>
+                <div class="chat-title">
+                    <h2 id="chat-title">💬 新对话</h2>
+                    <button id="rename-chat-btn" class="btn btn-icon-small" title="重命名">✏️</button>
+                </div>
+                <div class="chat-actions">
+                    <button id="clear-chat-btn" class="btn btn-text">
+                        <span class="btn-icon">🗑️</span>
+                        清空对话
+                    </button>
+                    <button id="delete-chat-btn" class="btn btn-text btn-danger">
+                        <span class="btn-icon">🗑️</span>
+                        删除对话
+                    </button>
+                </div>
             </div>
 
             <!-- 聊天消息区 -->
@@ -104,13 +85,13 @@
                             <p>4bit量化，低显存占用</p>
                         </div>
                     </div>
-                    <p class="welcome-hint">请先点击左侧"加载模型"按钮，然后开始对话</p>
+                    <p class="welcome-hint">请先前往设置页面加载模型，然后开始对话</p>
                 </div>
             </div>
 
             <!-- 输入区 -->
             <div class="chat-input-container">
-                <div class="image-preview" id="image-preview" style="display: none;">
+                <div class="image-preview hidden" id="image-preview">
                     <img id="preview-img" src="" alt="预览图片">
                     <button class="remove-image-btn" id="remove-image-btn">✕</button>
                 </div>
@@ -118,7 +99,7 @@
                     <button class="upload-btn" id="upload-btn" title="上传图片">
                         📎
                     </button>
-                    <input type="file" id="image-input" accept="image/*" style="display: none;">
+                    <input type="file" id="image-input" accept="image/*" class="hidden" aria-label="选择图片文件">
                     <textarea 
                         id="chat-input" 
                         placeholder="请输入您的问题...（支持医学图像分析）" 
