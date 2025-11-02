@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lingshu-7B - 医学多模态对话助手</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <!-- 侧边栏 -->
+        <aside class="sidebar">
+            <div class="logo">
+                <h1>🏥 Lingshu-7B</h1>
+                <p class="subtitle">医学多模态对话助手</p>
+            </div>
+
+            <div class="model-status">
+                <h3>模型状态</h3>
+                <div class="status-item">
+                    <span class="status-label">服务状态：</span>
+                    <span class="status-value" id="service-status">检查中...</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">模型状态：</span>
+                    <span class="status-value" id="model-status">未加载</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">量化模式：</span>
+                    <span class="status-value" id="quantization-mode">4bit</span>
+                </div>
+                <div class="status-item gpu-info" id="gpu-info" style="display: none;">
+                    <span class="status-label">GPU：</span>
+                    <span class="status-value" id="gpu-name">-</span>
+                </div>
+            </div>
+
+            <div class="model-controls">
+                <button id="load-model-btn" class="btn btn-primary">
+                    <span class="btn-icon">🚀</span>
+                    加载模型
+                </button>
+                <button id="unload-model-btn" class="btn btn-secondary" disabled>
+                    <span class="btn-icon">💤</span>
+                    卸载模型
+                </button>
+            </div>
+
+            <div class="settings">
+                <h3>生成设置</h3>
+                <div class="setting-item">
+                    <label for="temperature">温度 (Temperature)</label>
+                    <input type="range" id="temperature" min="0.1" max="1.5" step="0.1" value="0.7">
+                    <span class="setting-value" id="temperature-value">0.7</span>
+                </div>
+                <div class="setting-item">
+                    <label for="max-tokens">最大Token数</label>
+                    <input type="range" id="max-tokens" min="128" max="2048" step="128" value="512">
+                    <span class="setting-value" id="max-tokens-value">512</span>
+                </div>
+            </div>
+
+            <div class="info">
+                <h3>使用说明</h3>
+                <ul>
+                    <li>📝 输入医学相关问题</li>
+                    <li>🖼️ 可上传医学图像进行分析</li>
+                    <li>🤖 基于4bit量化，显存友好</li>
+                    <li>⚡ 支持多轮对话</li>
+                </ul>
+            </div>
+        </aside>
+
+        <!-- 主内容区 -->
+        <main class="main-content">
+            <div class="chat-header">
+                <h2>💬 对话区</h2>
+                <button id="clear-chat-btn" class="btn btn-text">
+                    <span class="btn-icon">🗑️</span>
+                    清空对话
+                </button>
+            </div>
+
+            <!-- 聊天消息区 -->
+            <div class="chat-messages" id="chat-messages">
+                <div class="welcome-message">
+                    <h2>👋 欢迎使用 Lingshu-7B 医学助手</h2>
+                    <p>这是一个基于Qwen2.5-VL的医学多模态对话系统</p>
+                    <div class="welcome-features">
+                        <div class="feature">
+                            <span class="feature-icon">💡</span>
+                            <h3>智能对话</h3>
+                            <p>专业的医学知识问答</p>
+                        </div>
+                        <div class="feature">
+                            <span class="feature-icon">🖼️</span>
+                            <h3>图像分析</h3>
+                            <p>支持医学图像的诊断分析</p>
+                        </div>
+                        <div class="feature">
+                            <span class="feature-icon">⚡</span>
+                            <h3>高效运行</h3>
+                            <p>4bit量化，低显存占用</p>
+                        </div>
+                    </div>
+                    <p class="welcome-hint">请先点击左侧"加载模型"按钮，然后开始对话</p>
+                </div>
+            </div>
+
+            <!-- 输入区 -->
+            <div class="chat-input-container">
+                <div class="image-preview" id="image-preview" style="display: none;">
+                    <img id="preview-img" src="" alt="预览图片">
+                    <button class="remove-image-btn" id="remove-image-btn">✕</button>
+                </div>
+                <div class="chat-input-wrapper">
+                    <button class="upload-btn" id="upload-btn" title="上传图片">
+                        📎
+                    </button>
+                    <input type="file" id="image-input" accept="image/*" style="display: none;">
+                    <textarea 
+                        id="chat-input" 
+                        placeholder="请输入您的问题...（支持医学图像分析）" 
+                        rows="1"
+                        disabled
+                    ></textarea>
+                    <button class="send-btn" id="send-btn" disabled>
+                        <span>发送</span>
+                        <span class="send-icon">➤</span>
+                    </button>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Loading遮罩 -->
+    <div class="loading-overlay" id="loading-overlay">
+        <div class="loading-spinner"></div>
+        <p id="loading-text">加载中...</p>
+    </div>
+
+    <script src="/static/js/api.js"></script>
+    <script src="/static/js/main.js"></script>
+</body>
+</html>
+
