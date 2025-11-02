@@ -123,7 +123,7 @@ class ModelManager:
     def generate_response(
         self, 
         prompt: str, 
-        image_path: Optional[str] = None,
+        image_paths: Optional[List[str]] = None,
         generation_config: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
@@ -131,7 +131,7 @@ class ModelManager:
         
         Args:
             prompt: 用户输入的问题
-            image_path: 图片路径（可选）
+            image_paths: 图片路径列表（可选）
             generation_config: 生成配置（可选）
             
         Returns:
@@ -139,7 +139,7 @@ class ModelManager:
         """
         return self.generate_response_with_history(
             prompt=prompt,
-            image_path=image_path,
+            image_paths=image_paths,
             history=[],
             generation_config=generation_config
         )
@@ -147,16 +147,16 @@ class ModelManager:
     def generate_response_with_history(
         self,
         prompt: str,
-        image_path: Optional[str] = None,
+        image_paths: Optional[List[str]] = None,
         history: Optional[List[Dict[str, Any]]] = None,
         generation_config: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
-        生成回复（支持对话历史）
+        生成回复（支持对话历史和多图片）
         
         Args:
             prompt: 用户输入的问题
-            image_path: 图片路径（可选）
+            image_paths: 图片路径列表（可选）
             history: 对话历史（可选）
             generation_config: 生成配置（可选）
             
@@ -173,7 +173,10 @@ class ModelManager:
             if history is None:
                 history = []
             
-            logger.info(f"🤔 生成回复: {prompt[:50]}... (历史消息数: {len(history)})")
+            if image_paths is None:
+                image_paths = []
+            
+            logger.info(f"🤔 生成回复: {prompt[:50]}... (图片数: {len(image_paths)}, 历史消息数: {len(history)})")
             
             # 构建消息列表，包含历史对话
             messages = []
@@ -192,14 +195,23 @@ class ModelManager:
             
             # 添加当前用户消息
             current_content = []
-            if image_path:
-                current_content.append({
-                    "type": "image",
-                    "image": image_path
-                })
-                logger.info(f"🖼️ 包含图片: {image_path}")
             
-            current_content.append({"type": "text", "text": prompt})
+            # 添加多张图片
+            if image_paths and len(image_paths) > 0:
+                for image_path in image_paths:
+                    current_content.append({
+                        "type": "image",
+                        "image": image_path
+                    })
+                logger.info(f"🖼️ 包含{len(image_paths)}张图片")
+            
+            # 如果有多张图片，增强提示词
+            enhanced_prompt = prompt
+            if image_paths and len(image_paths) > 1:
+                enhanced_prompt = f"我上传了{len(image_paths)}张图片。{prompt}\n\n请仔细分析每一张图片，对比它们之间的差异和联系，并给出综合的分析结果。"
+                logger.info(f"📝 检测到多图片，已增强提示词")
+            
+            current_content.append({"type": "text", "text": enhanced_prompt})
             
             messages.append({
                 "role": "user",
@@ -218,7 +230,7 @@ class ModelManager:
             # 处理视觉信息（只处理当前消息）
             image_inputs = None
             video_inputs = None
-            if image_path:
+            if image_paths and len(image_paths) > 0:
                 # 只处理当前的图片消息
                 current_messages = [messages[-1]]
                 image_inputs, video_inputs = process_vision_info(current_messages)
@@ -271,7 +283,8 @@ class ModelManager:
             return {
                 "success": True,
                 "response": response,
-                "has_image": image_path is not None
+                "has_images": len(image_paths) > 0,
+                "image_count": len(image_paths)
             }
             
         except Exception as e:
@@ -313,16 +326,16 @@ class ModelManager:
     def generate_response_stream(
         self,
         prompt: str,
-        image_path: Optional[str] = None,
+        image_paths: Optional[List[str]] = None,
         history: Optional[List[Dict[str, Any]]] = None,
         generation_config: Optional[Dict[str, Any]] = None
     ) -> Generator[str, None, None]:
         """
-        生成回复（流式输出，支持对话历史）
+        生成回复（流式输出，支持对话历史和多图片）
         
         Args:
             prompt: 用户输入的问题
-            image_path: 图片路径（可选）
+            image_paths: 图片路径列表（可选）
             history: 对话历史（可选）
             generation_config: 生成配置（可选）
             
@@ -337,7 +350,10 @@ class ModelManager:
             if history is None:
                 history = []
             
-            logger.info(f"🤔 流式生成回复: {prompt[:50]}... (历史消息数: {len(history)})")
+            if image_paths is None:
+                image_paths = []
+            
+            logger.info(f"🤔 流式生成回复: {prompt[:50]}... (图片数: {len(image_paths)}, 历史消息数: {len(history)})")
             
             # 构建消息列表，包含历史对话
             messages = []
@@ -356,14 +372,23 @@ class ModelManager:
             
             # 添加当前用户消息
             current_content = []
-            if image_path:
-                current_content.append({
-                    "type": "image",
-                    "image": image_path
-                })
-                logger.info(f"🖼️ 包含图片: {image_path}")
             
-            current_content.append({"type": "text", "text": prompt})
+            # 添加多张图片
+            if image_paths and len(image_paths) > 0:
+                for image_path in image_paths:
+                    current_content.append({
+                        "type": "image",
+                        "image": image_path
+                    })
+                logger.info(f"🖼️ 包含{len(image_paths)}张图片")
+            
+            # 如果有多张图片，增强提示词
+            enhanced_prompt = prompt
+            if image_paths and len(image_paths) > 1:
+                enhanced_prompt = f"我上传了{len(image_paths)}张图片。{prompt}\n\n请仔细分析每一张图片，对比它们之间的差异和联系，并给出综合的分析结果。"
+                logger.info(f"📝 检测到多图片，已增强提示词")
+            
+            current_content.append({"type": "text", "text": enhanced_prompt})
             
             messages.append({
                 "role": "user",
@@ -382,7 +407,7 @@ class ModelManager:
             # 处理视觉信息（只处理当前消息）
             image_inputs = None
             video_inputs = None
-            if image_path:
+            if image_paths and len(image_paths) > 0:
                 # 只处理当前的图片消息
                 current_messages = [messages[-1]]
                 image_inputs, video_inputs = process_vision_info(current_messages)

@@ -72,8 +72,8 @@
                         </div>
                         <div class="feature">
                             <span class="feature-icon">🖼️</span>
-                            <h3>图像分析</h3>
-                            <p>支持医学图像的诊断分析</p>
+                            <h3>多图像分析</h3>
+                            <p>支持同时上传多张图片进行对比分析</p>
                         </div>
                         <div class="feature">
                             <span class="feature-icon">⚡</span>
@@ -87,18 +87,19 @@
 
             <!-- 输入区 -->
             <div class="chat-input-container">
-                <div class="image-preview hidden" id="image-preview">
-                    <img id="preview-img" src="" alt="预览图片">
-                    <button class="remove-image-btn" id="remove-image-btn">✕</button>
+                <div class="image-preview-container hidden" id="image-preview-container">
+                    <div class="image-preview-list" id="image-preview-list">
+                        <!-- 图片预览将动态添加到这里 -->
+                    </div>
                 </div>
                 <div class="chat-input-wrapper">
-                    <button class="upload-btn" id="upload-btn" title="上传图片">
+                    <button class="upload-btn" id="upload-btn" title="上传图片（支持多选）">
                         📎
                     </button>
-                    <input type="file" id="image-input" accept="image/*" class="hidden" aria-label="选择图片文件">
+                    <input type="file" id="image-input" accept="image/*" multiple class="hidden" aria-label="选择图片文件（可多选）">
                     <textarea 
                         id="chat-input" 
-                        placeholder="请输入您的问题...（支持医学图像分析）" 
+                        placeholder="请输入您的问题...（支持多图片医学图像分析）" 
                         rows="1"
                         disabled
                     ></textarea>

@@ -106,16 +106,25 @@ class APIClient {
     /**
      * 发送聊天消息
      * @param {string} prompt - 用户输入的文本
-     * @param {File|null} image - 图片文件（可选）
+     * @param {File[]|File|null} images - 图片文件或图片文件数组（可选）
      * @param {Object} config - 生成配置（可选）
      * @param {string|null} sessionId - 会话ID（可选，用于上下文对话）
      */
-    async chat(prompt, image = null, config = null, sessionId = null) {
+    async chat(prompt, images = null, config = null, sessionId = null) {
         const formData = new FormData();
         formData.append('prompt', prompt);
         
-        if (image) {
-            formData.append('image', image);
+        // 支持单张图片或多张图片
+        if (images) {
+            if (Array.isArray(images)) {
+                // 多张图片
+                images.forEach((image, index) => {
+                    formData.append('images', image);
+                });
+            } else {
+                // 单张图片（向后兼容）
+                formData.append('images', images);
+            }
         }
         
         if (config) {
@@ -141,19 +150,28 @@ class APIClient {
     /**
      * 发送流式聊天消息
      * @param {string} prompt - 用户输入的文本
-     * @param {File|null} image - 图片文件（可选）
+     * @param {File[]|File|null} images - 图片文件或图片文件数组（可选）
      * @param {Object} config - 生成配置（可选）
      * @param {string|null} sessionId - 会话ID（可选，用于上下文对话）
      * @param {Function} onChunk - 接收文本块的回调函数
      * @param {Function} onComplete - 完成时的回调函数
      * @param {Function} onError - 错误时的回调函数
      */
-    async chatStream(prompt, image = null, config = null, sessionId = null, onChunk, onComplete, onError) {
+    async chatStream(prompt, images = null, config = null, sessionId = null, onChunk, onComplete, onError) {
         const formData = new FormData();
         formData.append('prompt', prompt);
         
-        if (image) {
-            formData.append('image', image);
+        // 支持单张图片或多张图片
+        if (images) {
+            if (Array.isArray(images)) {
+                // 多张图片
+                images.forEach((image, index) => {
+                    formData.append('images', image);
+                });
+            } else {
+                // 单张图片（向后兼容）
+                formData.append('images', images);
+            }
         }
         
         if (config) {

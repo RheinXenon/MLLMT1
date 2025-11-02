@@ -5,7 +5,7 @@
 // 应用状态
 const appState = {
     modelLoaded: false,
-    currentImage: null,
+    currentImages: [],  // 修改为数组以支持多图片
     isGenerating: false,
     currentChatId: null,  // 当前聊天ID
     chats: {},  // 所有聊天会话 { chatId: { id, title, messages, sessionId, createdAt, updatedAt } }
@@ -23,7 +23,6 @@ const elements = {
     renameChatBtn: document.getElementById('rename-chat-btn'),
     sendBtn: document.getElementById('send-btn'),
     uploadBtn: document.getElementById('upload-btn'),
-    removeImageBtn: document.getElementById('remove-image-btn'),
     
     // 输入
     chatInput: document.getElementById('chat-input'),
@@ -33,8 +32,8 @@ const elements = {
     // 显示区域
     chatMessages: document.getElementById('chat-messages'),
     chatList: document.getElementById('chat-list'),
-    imagePreview: document.getElementById('image-preview'),
-    previewImg: document.getElementById('preview-img'),
+    imagePreviewContainer: document.getElementById('image-preview-container'),
+    imagePreviewList: document.getElementById('image-preview-list'),
     loadingOverlay: document.getElementById('loading-overlay'),
     loadingText: document.getElementById('loading-text')
 };
@@ -85,7 +84,6 @@ function bindEventListeners() {
     // 图片上传
     elements.uploadBtn.addEventListener('click', () => elements.imageInput.click());
     elements.imageInput.addEventListener('change', handleImageSelect);
-    elements.removeImageBtn.addEventListener('click', handleRemoveImage);
 }
 
 /**
@@ -183,7 +181,9 @@ function switchToChat(chatId) {
     } else {
         // 渲染历史消息
         chat.messages.forEach(msg => {
-            addMessageToDOM(msg.role, msg.content, msg.imageUrl);
+            // 兼容旧版本的单图片格式
+            const imageUrls = msg.imageUrls || (msg.imageUrl ? [msg.imageUrl] : null);
+            addMessageToDOM(msg.role, msg.content, imageUrls);
         });
     }
     
@@ -401,18 +401,18 @@ async function handleSendMessage() {
         welcomeMessage.remove();
     }
     
-    // 保存图片URL（如果有）
-    let imageUrl = null;
-    if (appState.currentImage) {
-        imageUrl = URL.createObjectURL(appState.currentImage);
+    // 保存图片URLs（如果有多张图片）
+    let imageUrls = [];
+    if (appState.currentImages && appState.currentImages.length > 0) {
+        imageUrls = appState.currentImages.map(img => URL.createObjectURL(img));
     }
     
     // 添加用户消息到DOM和历史
-    addMessageToDOM('user', prompt, imageUrl);
+    addMessageToDOM('user', prompt, imageUrls);
     chat.messages.push({
         role: 'user',
         content: prompt,
-        imageUrl: imageUrl,
+        imageUrls: imageUrls,  // 改为数组
         timestamp: Date.now()
     });
     
@@ -448,10 +448,10 @@ async function handleSendMessage() {
     let fullResponse = '';
     
     try {
-        // 发送流式请求
+        // 发送流式请求（传递多张图片）
         await apiClient.chatStream(
             prompt, 
-            appState.currentImage, 
+            appState.currentImages,  // 传递图片数组
             config, 
             chat.sessionId,
             // onChunk: 接收到文本块
@@ -481,9 +481,9 @@ async function handleSendMessage() {
                 saveChatsToStorage();
                 updateChatList();
                 
-                // 清除图片
-                if (appState.currentImage) {
-                    handleRemoveImage();
+                // 清除所有图片
+                if (appState.currentImages.length > 0) {
+                    handleRemoveAllImages();
                 }
                 
                 // 恢复输入
@@ -498,9 +498,9 @@ async function handleSendMessage() {
                 streamingMsg.remove();
                 showNotification('生成回复时出错: ' + error, 'error');
                 
-                // 清除图片
-                if (appState.currentImage) {
-                    handleRemoveImage();
+                // 清除所有图片
+                if (appState.currentImages.length > 0) {
+                    handleRemoveAllImages();
                 }
                 
                 // 恢复输入
@@ -516,9 +516,9 @@ async function handleSendMessage() {
         streamingMsg.remove();
         showNotification('发送消息时出错: ' + error.message, 'error');
         
-        // 清除图片
-        if (appState.currentImage) {
-            handleRemoveImage();
+        // 清除所有图片
+        if (appState.currentImages.length > 0) {
+            handleRemoveAllImages();
         }
         
         // 恢复输入
@@ -532,19 +532,26 @@ async function handleSendMessage() {
 /**
  * 添加消息到DOM
  */
-function addMessageToDOM(role, content, imageUrl = null) {
+function addMessageToDOM(role, content, imageUrls = null) {
     const messageDiv = document.createElement('div');
     messageDiv.className = `message ${role}`;
     
     const messageContent = document.createElement('div');
     messageContent.className = 'message-content';
     
-    // 如果是用户消息且有图片，显示图片
-    if (role === 'user' && imageUrl) {
-        const img = document.createElement('img');
-        img.className = 'message-image';
-        img.src = imageUrl;
-        messageContent.appendChild(img);
+    // 如果是用户消息且有图片，显示多张图片
+    if (role === 'user' && imageUrls && imageUrls.length > 0) {
+        const imagesContainer = document.createElement('div');
+        imagesContainer.className = imageUrls.length === 1 ? 'message-images single' : 'message-images';
+        
+        imageUrls.forEach(url => {
+            const img = document.createElement('img');
+            img.className = 'message-image';
+            img.src = url;
+            imagesContainer.appendChild(img);
+        });
+        
+        messageContent.appendChild(imagesContainer);
     }
     
     // 添加文本内容
@@ -701,45 +708,115 @@ async function handleClearChat() {
 }
 
 /**
- * 处理图片选择
+ * 处理多图片选择
  */
 function handleImageSelect(e) {
-    const file = e.target.files[0];
-    if (!file) return;
+    const files = Array.from(e.target.files);
+    if (!files || files.length === 0) return;
     
-    // 检查文件类型
-    if (!file.type.startsWith('image/')) {
-        showNotification('请选择图片文件', 'error');
+    // 检查文件数量限制（例如最多5张）
+    const MAX_IMAGES = 5;
+    const currentCount = appState.currentImages.length;
+    const remainingSlots = MAX_IMAGES - currentCount;
+    
+    if (files.length > remainingSlots) {
+        showNotification(`最多只能上传${MAX_IMAGES}张图片，当前已有${currentCount}张`, 'warning');
         return;
     }
     
-    // 检查文件大小（16MB）
-    if (file.size > 16 * 1024 * 1024) {
-        showNotification('图片文件过大，请选择小于16MB的图片', 'error');
-        return;
+    // 验证每个文件
+    for (const file of files) {
+        // 检查文件类型
+        if (!file.type.startsWith('image/')) {
+            showNotification('只能选择图片文件', 'error');
+            return;
+        }
+        
+        // 检查文件大小（16MB）
+        if (file.size > 16 * 1024 * 1024) {
+            showNotification('图片文件过大，请选择小于16MB的图片', 'error');
+            return;
+        }
     }
     
-    // 保存图片
-    appState.currentImage = file;
+    // 添加到当前图片数组
+    appState.currentImages.push(...files);
     
-    // 显示预览
-    const reader = new FileReader();
-    reader.onload = (e) => {
-        elements.previewImg.src = e.target.result;
-        elements.imagePreview.classList.remove('hidden');
-    };
-    reader.readAsDataURL(file);
+    // 更新预览显示
+    updateImagePreview();
     
-    showNotification('图片已选择', 'success');
+    // 清空input，以便可以重新选择相同的文件
+    elements.imageInput.value = '';
+    
+    showNotification(`已选择${files.length}张图片`, 'success');
 }
 
 /**
- * 移除图片
+ * 更新图片预览显示
  */
-function handleRemoveImage() {
-    appState.currentImage = null;
-    elements.imagePreview.classList.add('hidden');
-    elements.previewImg.src = '';
+function updateImagePreview() {
+    elements.imagePreviewList.innerHTML = '';
+    
+    if (appState.currentImages.length === 0) {
+        elements.imagePreviewContainer.classList.add('hidden');
+        return;
+    }
+    
+    // 显示图片数量徽章
+    const badge = document.createElement('div');
+    badge.className = 'image-count-badge';
+    badge.textContent = `已选择 ${appState.currentImages.length} 张图片`;
+    elements.imagePreviewList.appendChild(badge);
+    
+    // 显示每张图片的预览
+    appState.currentImages.forEach((file, index) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const itemDiv = document.createElement('div');
+            itemDiv.className = 'image-preview-item';
+            
+            const img = document.createElement('img');
+            img.src = e.target.result;
+            img.alt = `预览图片 ${index + 1}`;
+            
+            const removeBtn = document.createElement('button');
+            removeBtn.className = 'remove-image-btn';
+            removeBtn.textContent = '✕';
+            removeBtn.title = '移除此图片';
+            removeBtn.onclick = (e) => {
+                e.stopPropagation();
+                handleRemoveSingleImage(index);
+            };
+            
+            itemDiv.appendChild(img);
+            itemDiv.appendChild(removeBtn);
+            elements.imagePreviewList.appendChild(itemDiv);
+        };
+        reader.readAsDataURL(file);
+    });
+    
+    elements.imagePreviewContainer.classList.remove('hidden');
+}
+
+/**
+ * 移除单张图片
+ */
+function handleRemoveSingleImage(index) {
+    appState.currentImages.splice(index, 1);
+    updateImagePreview();
+    
+    if (appState.currentImages.length === 0) {
+        showNotification('已移除所有图片', 'success');
+    }
+}
+
+/**
+ * 移除所有图片
+ */
+function handleRemoveAllImages() {
+    appState.currentImages = [];
+    elements.imagePreviewContainer.classList.add('hidden');
+    elements.imagePreviewList.innerHTML = '';
     elements.imageInput.value = '';
 }
 

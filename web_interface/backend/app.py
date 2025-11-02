@@ -173,31 +173,42 @@ def chat():
                 "error": "请输入问题"
             }), 400
         
-        # 处理图片（如果有）
-        image_path = None
-        if 'image' in request.files:
-            file = request.files['image']
-            if file and file.filename:
-                if allowed_file(file.filename):
-                    # 保存文件
-                    filename = secure_filename(file.filename)
-                    image_path = os.path.join(config.UPLOAD_FOLDER, filename)
-                    file.save(image_path)
-                    logger.info(f"保存图片: {image_path}")
-                else:
-                    return jsonify({
-                        "success": False,
-                        "error": "不支持的文件格式"
-                    }), 400
+        # 处理多张图片（如果有）
+        image_paths = []
+        if 'images' in request.files:
+            files = request.files.getlist('images')
+            for file in files:
+                if file and file.filename:
+                    if allowed_file(file.filename):
+                        # 保存文件
+                        filename = secure_filename(file.filename)
+                        # 添加时间戳避免文件名冲突
+                        import time
+                        timestamp = str(int(time.time() * 1000))
+                        base, ext = os.path.splitext(filename)
+                        filename = f"{base}_{timestamp}{ext}"
+                        image_path = os.path.join(config.UPLOAD_FOLDER, filename)
+                        file.save(image_path)
+                        image_paths.append(image_path)
+                        logger.info(f"保存图片: {image_path}")
+                    else:
+                        # 清理已保存的图片
+                        for path in image_paths:
+                            if os.path.exists(path):
+                                os.remove(path)
+                        return jsonify({
+                            "success": False,
+                            "error": "不支持的文件格式"
+                        }), 400
         
         # 获取会话历史
         history = conversation_sessions[session_id]
         
         # 生成回复（带历史记录）
-        logger.info(f"处理请求 [会话:{session_id[:8]}]: {prompt[:50]}... (图片: {image_path is not None}, 历史消息数: {len(history)})")
+        logger.info(f"处理请求 [会话:{session_id[:8]}]: {prompt[:50]}... (图片数: {len(image_paths)}, 历史消息数: {len(history)})")
         result = model_manager.generate_response_with_history(
             prompt=prompt,
-            image_path=image_path,
+            image_paths=image_paths,  # 传递图片路径列表
             history=history,
             generation_config=config.GENERATION_CONFIG
         )
@@ -208,7 +219,8 @@ def chat():
             user_message = {
                 "role": "user",
                 "content": prompt,
-                "has_image": image_path is not None,
+                "has_images": len(image_paths) > 0,
+                "image_count": len(image_paths),
                 "timestamp": datetime.now().isoformat()
             }
             conversation_sessions[session_id].append(user_message)
@@ -227,12 +239,13 @@ def chat():
             logger.info(f"对话已保存到历史 [会话:{session_id[:8]}], 当前消息数: {len(conversation_sessions[session_id])}")
         
         # 清理上传的临时图片
-        if image_path and os.path.exists(image_path):
-            try:
-                os.remove(image_path)
-                logger.info(f"删除临时图片: {image_path}")
-            except Exception as e:
-                logger.warning(f"删除临时图片失败: {e}")
+        for image_path in image_paths:
+            if os.path.exists(image_path):
+                try:
+                    os.remove(image_path)
+                    logger.info(f"删除临时图片: {image_path}")
+                except Exception as e:
+                    logger.warning(f"删除临时图片失败: {e}")
         
         return jsonify(result)
         
@@ -273,21 +286,32 @@ def chat_stream():
                 yield f"data: {json.dumps({'error': '请输入问题'})}\n\n"
             return Response(stream_with_context(error_gen()), mimetype='text/event-stream')
         
-        # 处理图片（如果有）
-        image_path = None
-        if 'image' in request.files:
-            file = request.files['image']
-            if file and file.filename:
-                if allowed_file(file.filename):
-                    # 保存文件
-                    filename = secure_filename(file.filename)
-                    image_path = os.path.join(config.UPLOAD_FOLDER, filename)
-                    file.save(image_path)
-                    logger.info(f"保存图片: {image_path}")
-                else:
-                    def error_gen():
-                        yield f"data: {json.dumps({'error': '不支持的文件格式'})}\n\n"
-                    return Response(stream_with_context(error_gen()), mimetype='text/event-stream')
+        # 处理多张图片（如果有）
+        image_paths = []
+        if 'images' in request.files:
+            files = request.files.getlist('images')
+            for file in files:
+                if file and file.filename:
+                    if allowed_file(file.filename):
+                        # 保存文件
+                        filename = secure_filename(file.filename)
+                        # 添加时间戳避免文件名冲突
+                        import time
+                        timestamp = str(int(time.time() * 1000))
+                        base, ext = os.path.splitext(filename)
+                        filename = f"{base}_{timestamp}{ext}"
+                        image_path = os.path.join(config.UPLOAD_FOLDER, filename)
+                        file.save(image_path)
+                        image_paths.append(image_path)
+                        logger.info(f"保存图片: {image_path}")
+                    else:
+                        # 清理已保存的图片
+                        for path in image_paths:
+                            if os.path.exists(path):
+                                os.remove(path)
+                        def error_gen():
+                            yield f"data: {json.dumps({'error': '不支持的文件格式'})}\n\n"
+                        return Response(stream_with_context(error_gen()), mimetype='text/event-stream')
         
         # 获取会话历史
         history = conversation_sessions[session_id]
@@ -300,12 +324,13 @@ def chat_stream():
         user_message = {
             "role": "user",
             "content": prompt,
-            "has_image": image_path is not None,
+            "has_images": len(image_paths) > 0,
+            "image_count": len(image_paths),
             "timestamp": datetime.now().isoformat()
         }
         conversation_sessions[session_id].append(user_message)
         
-        logger.info(f"处理流式请求 [会话:{session_id[:8]}]: {prompt[:50]}... (图片: {image_path is not None}, 历史消息数: {len(history)})")
+        logger.info(f"处理流式请求 [会话:{session_id[:8]}]: {prompt[:50]}... (图片数: {len(image_paths)}, 历史消息数: {len(history)})")
         
         def generate():
             """生成器函数，用于流式输出"""
@@ -318,7 +343,7 @@ def chat_stream():
                 # 流式生成回复
                 for chunk in model_manager.generate_response_stream(
                     prompt=prompt,
-                    image_path=image_path,
+                    image_paths=image_paths,  # 传递图片路径列表
                     history=history,
                     generation_config=generation_config
                 ):
@@ -345,12 +370,13 @@ def chat_stream():
                 yield f"data: {json.dumps({'error': str(e)})}\n\n"
             finally:
                 # 清理上传的临时图片
-                if image_path and os.path.exists(image_path):
-                    try:
-                        os.remove(image_path)
-                        logger.info(f"删除临时图片: {image_path}")
-                    except Exception as e:
-                        logger.warning(f"删除临时图片失败: {e}")
+                for image_path in image_paths:
+                    if os.path.exists(image_path):
+                        try:
+                            os.remove(image_path)
+                            logger.info(f"删除临时图片: {image_path}")
+                        except Exception as e:
+                            logger.warning(f"删除临时图片失败: {e}")
         
         return Response(stream_with_context(generate()), mimetype='text/event-stream')
         
