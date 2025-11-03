@@ -12,6 +12,8 @@ from pathlib import Path
 import uuid
 from datetime import datetime
 import json
+from threading import Semaphore
+from functools import wraps
 
 from model_manager import ModelManager
 import config
@@ -47,6 +49,29 @@ model_manager = None
 # 会话存储 - 存储每个会话的对话历史
 # 格式: {session_id: [{"role": "user/assistant", "content": [...], "timestamp": ...}, ...]}
 conversation_sessions = {}
+
+# 并发控制信号量
+request_semaphore = Semaphore(config.MAX_CONCURRENT_REQUESTS)
+
+
+def with_concurrency_limit(f):
+    """装饰器：限制并发请求数"""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        # 尝试获取信号量（非阻塞）
+        if not request_semaphore.acquire(blocking=False):
+            logger.warning("服务器繁忙，拒绝新请求")
+            return jsonify({
+                "success": False,
+                "error": "服务器繁忙，请稍后重试"
+            }), 429
+        
+        try:
+            return f(*args, **kwargs)
+        finally:
+            request_semaphore.release()
+    
+    return decorated_function
 
 
 def allowed_file(filename):
@@ -146,6 +171,7 @@ def load_model():
 
 
 @app.route('/api/chat', methods=['POST'])
+@with_concurrency_limit
 def chat():
     """处理聊天请求（支持上下文记忆）"""
     if not model_manager or not model_manager.is_loaded():
@@ -215,6 +241,9 @@ def chat():
             generation_config=config.GENERATION_CONFIG
         )
         
+        # 获取压缩文件路径
+        compressed_paths = result.get('compressed_paths', []) if result.get('success') else []
+        
         # 如果生成成功，保存到历史记录
         if result.get('success'):
             # 保存用户消息
@@ -240,14 +269,15 @@ def chat():
             
             logger.info(f"对话已保存到历史 [会话:{session_id[:8]}], 当前消息数: {len(conversation_sessions[session_id])}")
         
-        # 清理上传的临时图片
-        for image_path in image_paths:
-            if os.path.exists(image_path):
+        # 清理上传的临时图片（原始文件和压缩文件）
+        all_temp_files = image_paths + compressed_paths
+        for temp_path in all_temp_files:
+            if os.path.exists(temp_path):
                 try:
-                    os.remove(image_path)
-                    logger.info(f"删除临时图片: {image_path}")
+                    os.remove(temp_path)
+                    logger.info(f"删除临时文件: {temp_path}")
                 except Exception as e:
-                    logger.warning(f"删除临时图片失败: {e}")
+                    logger.warning(f"删除临时文件失败: {e}")
         
         return jsonify(result)
         
@@ -263,7 +293,15 @@ def chat():
 @app.route('/api/chat_stream', methods=['POST'])
 def chat_stream():
     """处理流式聊天请求（支持上下文记忆）"""
+    # 尝试获取并发信号量
+    if not request_semaphore.acquire(blocking=False):
+        logger.warning("服务器繁忙，拒绝流式请求")
+        def error_gen():
+            yield f"data: {json.dumps({'error': '服务器繁忙，请稍后重试'})}\n\n"
+        return Response(stream_with_context(error_gen()), mimetype='text/event-stream')
+    
     if not model_manager or not model_manager.is_loaded():
+        request_semaphore.release()  # 释放信号量
         def error_gen():
             yield f"data: {json.dumps({'error': '模型未加载，请先加载模型'})}\n\n"
         return Response(stream_with_context(error_gen()), mimetype='text/event-stream')
@@ -336,18 +374,22 @@ def chat_stream():
         
         def generate():
             """生成器函数，用于流式输出"""
+            # 用于接收压缩文件路径的容器
+            compressed_paths = []
+            
             try:
                 # 发送会话ID
                 yield f"data: {json.dumps({'session_id': session_id})}\n\n"
                 
                 full_response = ""
                 
-                # 流式生成回复
+                # 流式生成回复（传递压缩路径容器）
                 for chunk in model_manager.generate_response_stream(
                     prompt=prompt,
                     image_paths=image_paths,  # 传递图片路径列表
                     history=history,
-                    generation_config=generation_config
+                    generation_config=generation_config,
+                    compressed_paths_container=compressed_paths  # 传递容器以接收压缩文件路径
                 ):
                     full_response += chunk
                     # 发送文本块
@@ -371,20 +413,27 @@ def chat_stream():
                 traceback.print_exc()
                 yield f"data: {json.dumps({'error': str(e)})}\n\n"
             finally:
-                # 清理上传的临时图片
-                for image_path in image_paths:
-                    if os.path.exists(image_path):
+                # 清理上传的临时文件（原始文件和压缩文件）
+                all_temp_files = image_paths + compressed_paths
+                logger.info(f"开始清理临时文件，共{len(all_temp_files)}个（原始:{len(image_paths)}, 压缩:{len(compressed_paths)}）")
+                for temp_path in all_temp_files:
+                    if os.path.exists(temp_path):
                         try:
-                            os.remove(image_path)
-                            logger.info(f"删除临时图片: {image_path}")
+                            os.remove(temp_path)
+                            logger.info(f"删除临时文件: {temp_path}")
                         except Exception as e:
-                            logger.warning(f"删除临时图片失败: {e}")
+                            logger.warning(f"删除临时文件失败: {e}")
+                
+                # 释放并发信号量
+                request_semaphore.release()
+                logger.info("已释放并发信号量")
         
         return Response(stream_with_context(generate()), mimetype='text/event-stream')
         
     except Exception as e:
         logger.error(f"处理流式聊天请求时出错: {e}")
         traceback.print_exc()
+        request_semaphore.release()  # 确保异常时也释放信号量
         def error_gen():
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
         return Response(stream_with_context(error_gen()), mimetype='text/event-stream')

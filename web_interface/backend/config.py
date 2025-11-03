@@ -35,5 +35,9 @@ FLASK_HOST = "0.0.0.0"
 FLASK_PORT = 5000
 FLASK_DEBUG = True
 
+# 并发控制配置
+MAX_CONCURRENT_REQUESTS = 3  # 最大并发请求数（防止服务器过载）
+REQUEST_TIMEOUT = 300  # 请求超时时间（秒）
+
 # 确保上传文件夹存在
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)

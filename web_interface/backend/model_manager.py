@@ -171,13 +171,16 @@ class ModelManager:
             generation_config: 生成配置（可选）
             
         Returns:
-            包含生成结果的字典
+            包含生成结果的字典，包含压缩后的图片路径用于清理
         """
         if self.model is None or self.processor is None:
             return {
                 "success": False,
                 "error": "模型未加载"
             }
+        
+        # 记录压缩后的图片路径（用于清理）
+        compressed_paths = []
         
         try:
             if history is None:
@@ -187,6 +190,22 @@ class ModelManager:
                 image_paths = []
             
             logger.info(f"🤔 生成回复: {prompt[:50]}... (图片数: {len(image_paths)}, 历史消息数: {len(history)})")
+            
+            # 统一预处理图片（压缩以节省显存）
+            if image_paths and len(image_paths) > 0:
+                logger.info("🖼️ 开始预处理图片...")
+                processed_paths = []
+                for img_path in image_paths:
+                    processed_path = self.preprocess_image(img_path, max_size=1024)
+                    processed_paths.append(processed_path)
+                    # 如果生成了压缩文件（路径不同），记录下来
+                    if processed_path != img_path:
+                        compressed_paths.append(processed_path)
+                image_paths = processed_paths
+                logger.info(f"✅ 图片预处理完成，生成了{len(compressed_paths)}个压缩文件")
+            
+            # 清理CUDA缓存
+            self.clear_cuda_cache()
             
             # 构建消息列表，包含历史对话
             messages = []
@@ -294,7 +313,8 @@ class ModelManager:
                 "success": True,
                 "response": response,
                 "has_images": len(image_paths) > 0,
-                "image_count": len(image_paths)
+                "image_count": len(image_paths),
+                "compressed_paths": compressed_paths  # 返回压缩文件路径用于清理
             }
             
         except Exception as e:
@@ -422,7 +442,8 @@ class ModelManager:
         prompt: str,
         image_paths: Optional[List[str]] = None,
         history: Optional[List[Dict[str, Any]]] = None,
-        generation_config: Optional[Dict[str, Any]] = None
+        generation_config: Optional[Dict[str, Any]] = None,
+        compressed_paths_container: Optional[List[str]] = None
     ) -> Generator[str, None, None]:
         """
         生成回复（流式输出，支持对话历史和多图片）
@@ -432,6 +453,7 @@ class ModelManager:
             image_paths: 图片路径列表（可选）
             history: 对话历史（可选）
             generation_config: 生成配置（可选）
+            compressed_paths_container: 用于返回压缩文件路径的列表容器（可选）
             
         Yields:
             生成的文本片段
@@ -449,15 +471,19 @@ class ModelManager:
             
             logger.info(f"🤔 流式生成回复: {prompt[:50]}... (图片数: {len(image_paths)}, 历史消息数: {len(history)})")
             
-            # 预处理图片（压缩以节省显存）
-            processed_image_paths = []
+            # 统一预处理图片（压缩以节省显存）
             if image_paths and len(image_paths) > 0:
                 logger.info("🖼️ 开始预处理图片...")
+                processed_paths = []
                 for img_path in image_paths:
                     processed_path = self.preprocess_image(img_path, max_size=1024)
-                    processed_image_paths.append(processed_path)
-            else:
-                processed_image_paths = image_paths
+                    processed_paths.append(processed_path)
+                    # 如果生成了压缩文件（路径不同），记录下来
+                    if processed_path != img_path and compressed_paths_container is not None:
+                        compressed_paths_container.append(processed_path)
+                image_paths = processed_paths
+                if compressed_paths_container is not None:
+                    logger.info(f"✅ 图片预处理完成，生成了{len(compressed_paths_container)}个压缩文件")
             
             # 清理CUDA缓存
             self.clear_cuda_cache()
