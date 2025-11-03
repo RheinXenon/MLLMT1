@@ -1095,6 +1095,19 @@ async function handleSaveEditedMessage(messageIndex, newContent, messageDiv, tex
     // 删除此消息之后的所有消息
     chat.messages = chat.messages.slice(0, messageIndex + 1);
     
+    // 关键修复：清除后端的会话历史，避免残留旧消息
+    // 因为我们截断了前端的历史，但后端的历史还保留着被编辑掉的消息
+    if (chat.sessionId) {
+        try {
+            await apiClient.clearHistory(chat.sessionId);
+            console.log('已清除后端会话历史，避免旧消息残留');
+        } catch (error) {
+            console.error('清除后端会话历史失败:', error);
+        }
+        // 重置会话ID，让后端创建新的会话
+        chat.sessionId = null;
+    }
+    
     // 更新聊天时间
     chat.updatedAt = Date.now();
     saveChatsToStorage();
