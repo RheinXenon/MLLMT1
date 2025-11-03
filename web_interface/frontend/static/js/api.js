@@ -156,8 +156,9 @@ class APIClient {
      * @param {Function} onChunk - 接收文本块的回调函数
      * @param {Function} onComplete - 完成时的回调函数
      * @param {Function} onError - 错误时的回调函数
+     * @param {AbortSignal} signal - 中止信号（可选，用于取消请求）
      */
-    async chatStream(prompt, images = null, config = null, sessionId = null, onChunk, onComplete, onError) {
+    async chatStream(prompt, images = null, config = null, sessionId = null, onChunk, onComplete, onError, signal = null) {
         const formData = new FormData();
         formData.append('prompt', prompt);
         
@@ -185,7 +186,8 @@ class APIClient {
         try {
             const response = await fetch(`${this.baseURL}/api/chat_stream`, {
                 method: 'POST',
-                body: formData
+                body: formData,
+                signal: signal  // 添加中止信号支持
             });
             
             if (!response.ok) {
@@ -236,6 +238,12 @@ class APIClient {
             }
             
         } catch (error) {
+            // 检查是否是用户主动中止
+            if (error.name === 'AbortError') {
+                console.log('请求已被用户中止');
+                onError('已中止生成');
+                return;
+            }
             console.error('流式请求失败:', error);
             onError(error.message);
         }

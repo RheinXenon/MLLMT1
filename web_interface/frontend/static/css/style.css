@@ -1074,3 +1074,114 @@ body {
     }
 }
 
+/* ===== 中止按钮样式 ===== */
+.btn-stop {
+    background: var(--danger-color);
+    color: white;
+    width: auto;
+    padding: var(--spacing-sm) var(--spacing-lg);
+    margin: 0;
+    display: none;  /* 默认隐藏 */
+}
+
+.btn-stop:hover:not(:disabled) {
+    background: #dc2626;
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-md);
+}
+
+.btn-stop .btn-icon {
+    font-size: 1rem;
+}
+
+/* ===== 消息元数据容器 ===== */
+.message-meta {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    margin-top: var(--spacing-xs);
+}
+
+.message.user .message-meta {
+    justify-content: flex-end;
+}
+
+.message.user .message-time {
+    color: rgba(255, 255, 255, 0.7);
+}
+
+/* ===== 消息编辑按钮 ===== */
+.message-edit-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
+    background: rgba(255, 255, 255, 0.2);
+    color: rgba(255, 255, 255, 0.9);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: var(--radius-sm);
+    font-size: 0.75rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    white-space: nowrap;
+}
+
+.message-edit-btn:hover {
+    background: rgba(255, 255, 255, 0.3);
+    border-color: rgba(255, 255, 255, 0.5);
+    transform: translateY(-1px);
+}
+
+/* ===== 消息编辑容器 ===== */
+.message-edit-container {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-sm);
+    width: 100%;
+    margin-top: var(--spacing-sm);
+}
+
+.message-edit-textarea {
+    width: 100%;
+    min-height: 80px;
+    padding: var(--spacing-sm);
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    border-radius: var(--radius-md);
+    background: rgba(255, 255, 255, 0.1);
+    color: white;
+    font-family: inherit;
+    font-size: 0.875rem;
+    resize: vertical;
+    outline: none;
+    transition: all 0.2s;
+}
+
+.message-edit-textarea:focus {
+    border-color: rgba(255, 255, 255, 0.5);
+    background: rgba(255, 255, 255, 0.15);
+}
+
+.message-edit-textarea::placeholder {
+    color: rgba(255, 255, 255, 0.5);
+}
+
+.message-edit-buttons {
+    display: flex;
+    gap: var(--spacing-sm);
+    justify-content: flex-end;
+}
+
+.btn-small {
+    padding: 6px 12px;
+    font-size: 0.75rem;
+    width: auto;
+    margin: 0;
+}
+
+/* ===== 消息文本样式 ===== */
+.message-text {
+    white-space: pre-wrap;
+    word-break: break-word;
+    line-height: 1.6;
+}
+

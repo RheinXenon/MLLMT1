@@ -9,6 +9,7 @@ const appState = {
     isGenerating: false,
     currentChatId: null,  // 当前聊天ID
     chats: {},  // 所有聊天会话 { chatId: { id, title, messages, sessionId, createdAt, updatedAt } }
+    abortController: null,  // 用于中止生成的控制器
 };
 
 // DOM元素
@@ -180,10 +181,10 @@ function switchToChat(chatId) {
         `;
     } else {
         // 渲染历史消息
-        chat.messages.forEach(msg => {
+        chat.messages.forEach((msg, index) => {
             // 兼容旧版本的单图片格式
             const imageUrls = msg.imageUrls || (msg.imageUrl ? [msg.imageUrl] : null);
-            addMessageToDOM(msg.role, msg.content, imageUrls);
+            addMessageToDOM(msg.role, msg.content, imageUrls, index);
         });
     }
     
@@ -443,9 +444,15 @@ async function handleSendMessage() {
     elements.sendBtn.disabled = true;
     elements.chatInput.disabled = true;
     
+    // 创建中止控制器
+    appState.abortController = new AbortController();
+    
     // 添加流式消息容器
     const streamingMsg = addStreamingMessage();
     let fullResponse = '';
+    
+    // 显示中止按钮
+    showStopButton();
     
     try {
         // 发送流式请求（传递多张图片）
@@ -486,8 +493,12 @@ async function handleSendMessage() {
                     handleRemoveAllImages();
                 }
                 
+                // 隐藏中止按钮
+                hideStopButton();
+                
                 // 恢复输入
                 appState.isGenerating = false;
+                appState.abortController = null;
                 elements.sendBtn.disabled = false;
                 elements.chatInput.disabled = false;
                 elements.chatInput.focus();
@@ -495,20 +506,47 @@ async function handleSendMessage() {
             // onError: 错误
             (error) => {
                 console.error('流式生成失败:', error);
-                streamingMsg.remove();
-                showNotification('生成回复时出错: ' + error, 'error');
+                
+                // 如果是中止错误，保留已生成的内容
+                if (error === '已中止生成' && fullResponse) {
+                    // 完成流式显示（保留已生成的内容）
+                    finalizeStreamingMessage(streamingMsg);
+                    
+                    // 添加到历史（标记为已中止）
+                    chat.messages.push({
+                        role: 'assistant',
+                        content: fullResponse + '\n\n[生成已中止]',
+                        timestamp: Date.now()
+                    });
+                    
+                    // 更新聊天时间
+                    chat.updatedAt = Date.now();
+                    saveChatsToStorage();
+                    updateChatList();
+                    
+                    showNotification('已中止生成', 'info');
+                } else {
+                    streamingMsg.remove();
+                    showNotification('生成回复时出错: ' + error, 'error');
+                }
                 
                 // 清除所有图片
                 if (appState.currentImages.length > 0) {
                     handleRemoveAllImages();
                 }
                 
+                // 隐藏中止按钮
+                hideStopButton();
+                
                 // 恢复输入
                 appState.isGenerating = false;
+                appState.abortController = null;
                 elements.sendBtn.disabled = false;
                 elements.chatInput.disabled = false;
                 elements.chatInput.focus();
-            }
+            },
+            // signal: 中止信号
+            appState.abortController.signal
         );
         
     } catch (error) {
@@ -521,8 +559,12 @@ async function handleSendMessage() {
             handleRemoveAllImages();
         }
         
+        // 隐藏中止按钮
+        hideStopButton();
+        
         // 恢复输入
         appState.isGenerating = false;
+        appState.abortController = null;
         elements.sendBtn.disabled = false;
         elements.chatInput.disabled = false;
         elements.chatInput.focus();
@@ -532,9 +574,14 @@ async function handleSendMessage() {
 /**
  * 添加消息到DOM
  */
-function addMessageToDOM(role, content, imageUrls = null) {
+function addMessageToDOM(role, content, imageUrls = null, messageIndex = null) {
     const messageDiv = document.createElement('div');
     messageDiv.className = `message ${role}`;
+    
+    // 为用户消息添加数据属性以便后续编辑
+    if (role === 'user' && messageIndex !== null) {
+        messageDiv.dataset.messageIndex = messageIndex;
+    }
     
     const messageContent = document.createElement('div');
     messageContent.className = 'message-content';
@@ -556,17 +603,33 @@ function addMessageToDOM(role, content, imageUrls = null) {
     
     // 添加文本内容
     const textDiv = document.createElement('div');
+    textDiv.className = 'message-text';
     textDiv.textContent = content;
     messageContent.appendChild(textDiv);
     
-    // 添加时间戳
+    // 添加时间戳和操作按钮容器
+    const metaDiv = document.createElement('div');
+    metaDiv.className = 'message-meta';
+    
     const timeDiv = document.createElement('div');
     timeDiv.className = 'message-time';
     timeDiv.textContent = new Date().toLocaleTimeString('zh-CN', { 
         hour: '2-digit', 
         minute: '2-digit' 
     });
-    messageContent.appendChild(timeDiv);
+    metaDiv.appendChild(timeDiv);
+    
+    // 如果是用户消息，添加编辑按钮
+    if (role === 'user' && messageIndex !== null) {
+        const editBtn = document.createElement('button');
+        editBtn.className = 'message-edit-btn';
+        editBtn.innerHTML = '✏️ 编辑';
+        editBtn.title = '编辑此消息';
+        editBtn.onclick = () => handleEditMessage(messageIndex);
+        metaDiv.appendChild(editBtn);
+    }
+    
+    messageContent.appendChild(metaDiv);
     
     messageDiv.appendChild(messageContent);
     elements.chatMessages.appendChild(messageDiv);
@@ -882,6 +945,305 @@ function showNotification(message, type = 'info') {
         alert('错误: ' + message);
     } else if (type === 'warning') {
         console.warn(message);
+    }
+}
+
+/**
+ * 显示中止按钮
+ */
+function showStopButton() {
+    // 查找是否已存在中止按钮
+    let stopBtn = document.getElementById('stop-generation-btn');
+    
+    if (!stopBtn) {
+        // 创建中止按钮
+        stopBtn = document.createElement('button');
+        stopBtn.id = 'stop-generation-btn';
+        stopBtn.className = 'btn btn-stop';
+        stopBtn.innerHTML = '<span class="btn-icon">⏹</span> 中止生成';
+        stopBtn.onclick = handleStopGeneration;
+        
+        // 将按钮插入到发送按钮之前
+        elements.sendBtn.parentNode.insertBefore(stopBtn, elements.sendBtn);
+    }
+    
+    // 隐藏发送按钮，显示中止按钮
+    elements.sendBtn.style.display = 'none';
+    stopBtn.style.display = 'flex';
+}
+
+/**
+ * 隐藏中止按钮
+ */
+function hideStopButton() {
+    const stopBtn = document.getElementById('stop-generation-btn');
+    if (stopBtn) {
+        stopBtn.style.display = 'none';
+    }
+    
+    // 显示发送按钮
+    elements.sendBtn.style.display = 'flex';
+}
+
+/**
+ * 处理中止生成
+ */
+function handleStopGeneration() {
+    if (appState.abortController) {
+        console.log('用户请求中止生成');
+        appState.abortController.abort();
+    }
+}
+
+/**
+ * 处理编辑消息
+ */
+function handleEditMessage(messageIndex) {
+    if (!appState.currentChatId) return;
+    
+    // 检查是否正在生成
+    if (appState.isGenerating) {
+        showNotification('请等待当前生成完成', 'warning');
+        return;
+    }
+    
+    const chat = appState.chats[appState.currentChatId];
+    const message = chat.messages[messageIndex];
+    
+    if (!message || message.role !== 'user') {
+        console.error('无效的消息索引或消息不是用户消息');
+        return;
+    }
+    
+    // 找到对应的DOM元素
+    const messageDiv = document.querySelector(`.message.user[data-message-index="${messageIndex}"]`);
+    if (!messageDiv) {
+        console.error('找不到对应的消息DOM元素');
+        return;
+    }
+    
+    const messageContent = messageDiv.querySelector('.message-content');
+    const textDiv = messageContent.querySelector('.message-text');
+    const metaDiv = messageContent.querySelector('.message-meta');
+    
+    // 保存原始内容
+    const originalContent = message.content;
+    
+    // 创建编辑区域
+    const editContainer = document.createElement('div');
+    editContainer.className = 'message-edit-container';
+    
+    const textarea = document.createElement('textarea');
+    textarea.className = 'message-edit-textarea';
+    textarea.value = originalContent;
+    textarea.rows = Math.max(3, originalContent.split('\n').length);
+    editContainer.appendChild(textarea);
+    
+    // 创建按钮容器
+    const buttonContainer = document.createElement('div');
+    buttonContainer.className = 'message-edit-buttons';
+    
+    const saveBtn = document.createElement('button');
+    saveBtn.className = 'btn btn-primary btn-small';
+    saveBtn.textContent = '保存并重新生成';
+    saveBtn.onclick = () => handleSaveEditedMessage(messageIndex, textarea.value, messageDiv, textDiv, metaDiv, editContainer);
+    
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'btn btn-secondary btn-small';
+    cancelBtn.textContent = '取消';
+    cancelBtn.onclick = () => handleCancelEditMessage(messageDiv, textDiv, metaDiv, editContainer);
+    
+    buttonContainer.appendChild(saveBtn);
+    buttonContainer.appendChild(cancelBtn);
+    editContainer.appendChild(buttonContainer);
+    
+    // 隐藏原始文本和元数据，显示编辑区域
+    textDiv.style.display = 'none';
+    metaDiv.style.display = 'none';
+    messageContent.appendChild(editContainer);
+    
+    // 聚焦到文本框
+    textarea.focus();
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+}
+
+/**
+ * 保存编辑的消息并重新生成
+ */
+async function handleSaveEditedMessage(messageIndex, newContent, messageDiv, textDiv, metaDiv, editContainer) {
+    if (!appState.currentChatId) return;
+    
+    newContent = newContent.trim();
+    if (!newContent) {
+        showNotification('消息内容不能为空', 'warning');
+        return;
+    }
+    
+    const chat = appState.chats[appState.currentChatId];
+    const message = chat.messages[messageIndex];
+    
+    // 如果内容没有变化，直接取消编辑
+    if (newContent === message.content) {
+        handleCancelEditMessage(messageDiv, textDiv, metaDiv, editContainer);
+        return;
+    }
+    
+    // 更新消息内容
+    message.content = newContent;
+    message.timestamp = Date.now();
+    
+    // 删除此消息之后的所有消息
+    chat.messages = chat.messages.slice(0, messageIndex + 1);
+    
+    // 更新聊天时间
+    chat.updatedAt = Date.now();
+    saveChatsToStorage();
+    
+    // 更新DOM显示
+    textDiv.textContent = newContent;
+    textDiv.style.display = 'block';
+    metaDiv.style.display = 'flex';
+    editContainer.remove();
+    
+    // 删除此消息之后的所有DOM元素
+    let nextSibling = messageDiv.nextElementSibling;
+    while (nextSibling) {
+        const toRemove = nextSibling;
+        nextSibling = nextSibling.nextElementSibling;
+        toRemove.remove();
+    }
+    
+    // 重新生成回复
+    await regenerateResponse(newContent, message.imageUrls);
+}
+
+/**
+ * 取消编辑消息
+ */
+function handleCancelEditMessage(messageDiv, textDiv, metaDiv, editContainer) {
+    textDiv.style.display = 'block';
+    metaDiv.style.display = 'flex';
+    editContainer.remove();
+}
+
+/**
+ * 重新生成回复（编辑后）
+ */
+async function regenerateResponse(prompt, imageUrls = null) {
+    if (!appState.currentChatId) return;
+    if (!appState.modelLoaded) {
+        showNotification('请先前往设置页面加载模型', 'warning');
+        return;
+    }
+    
+    const chat = appState.chats[appState.currentChatId];
+    
+    // 获取生成配置
+    const settings = JSON.parse(localStorage.getItem('generationSettings') || '{}');
+    const config = {
+        temperature: settings.temperature || 0.7,
+        max_new_tokens: settings.maxTokens || 512
+    };
+    
+    // 禁用输入
+    appState.isGenerating = true;
+    elements.sendBtn.disabled = true;
+    elements.chatInput.disabled = true;
+    
+    // 创建中止控制器
+    appState.abortController = new AbortController();
+    
+    // 添加流式消息容器
+    const streamingMsg = addStreamingMessage();
+    let fullResponse = '';
+    
+    // 显示中止按钮
+    showStopButton();
+    
+    try {
+        // 注意：这里不需要上传图片，因为图片已经在之前上传过了
+        // 如果消息有图片，它们已经存储在服务器端的会话历史中
+        await apiClient.chatStream(
+            prompt,
+            null,  // 不重新上传图片
+            config,
+            chat.sessionId,
+            // onChunk
+            (chunk) => {
+                fullResponse += chunk;
+                updateStreamingMessage(streamingMsg, fullResponse);
+            },
+            // onComplete
+            (sessionId) => {
+                if (sessionId) {
+                    chat.sessionId = sessionId;
+                }
+                
+                finalizeStreamingMessage(streamingMsg);
+                
+                chat.messages.push({
+                    role: 'assistant',
+                    content: fullResponse,
+                    timestamp: Date.now()
+                });
+                
+                chat.updatedAt = Date.now();
+                saveChatsToStorage();
+                updateChatList();
+                
+                hideStopButton();
+                
+                appState.isGenerating = false;
+                appState.abortController = null;
+                elements.sendBtn.disabled = false;
+                elements.chatInput.disabled = false;
+                elements.chatInput.focus();
+            },
+            // onError
+            (error) => {
+                console.error('重新生成失败:', error);
+                
+                if (error === '已中止生成' && fullResponse) {
+                    finalizeStreamingMessage(streamingMsg);
+                    
+                    chat.messages.push({
+                        role: 'assistant',
+                        content: fullResponse + '\n\n[生成已中止]',
+                        timestamp: Date.now()
+                    });
+                    
+                    chat.updatedAt = Date.now();
+                    saveChatsToStorage();
+                    updateChatList();
+                    
+                    showNotification('已中止生成', 'info');
+                } else {
+                    streamingMsg.remove();
+                    showNotification('重新生成时出错: ' + error, 'error');
+                }
+                
+                hideStopButton();
+                
+                appState.isGenerating = false;
+                appState.abortController = null;
+                elements.sendBtn.disabled = false;
+                elements.chatInput.disabled = false;
+                elements.chatInput.focus();
+            },
+            appState.abortController.signal
+        );
+    } catch (error) {
+        console.error('重新生成失败:', error);
+        streamingMsg.remove();
+        showNotification('重新生成时出错: ' + error.message, 'error');
+        
+        hideStopButton();
+        
+        appState.isGenerating = false;
+        appState.abortController = null;
+        elements.sendBtn.disabled = false;
+        elements.chatInput.disabled = false;
+        elements.chatInput.focus();
     }
 }
 
