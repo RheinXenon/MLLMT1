@@ -1,5 +1,10 @@
 """
 模型管理器 - 负责加载和管理Lingshu-7B模型
+
+重大更新：集成图片上下文管理器
+- 优化多图片场景的性能
+- 避免重复编码历史图片
+- 大幅降低显存和计算压力
 """
 
 import torch
@@ -12,6 +17,8 @@ from threading import Thread
 from PIL import Image
 import os
 
+from image_context_manager import ImageContextManager, ImageContextStrategy
+
 # 配置日志
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -20,7 +27,15 @@ logger = logging.getLogger(__name__)
 class ModelManager:
     """模型管理器类"""
     
-    def __init__(self, model_path: str, quantization: str = "4bit", max_pixels: int = 1003520):
+    def __init__(
+        self, 
+        model_path: str, 
+        quantization: str = "4bit", 
+        max_pixels: int = 1003520,
+        image_context_strategy: str = ImageContextStrategy.CURRENT_WITH_TEXT_HISTORY,
+        max_recent_images: int = 2,
+        enable_image_summary: bool = True
+    ):
         """
         初始化模型管理器
         
@@ -28,6 +43,9 @@ class ModelManager:
             model_path: 模型路径
             quantization: 量化模式 (4bit, 8bit, standard, cpu)
             max_pixels: 最大像素数，默认1003520(约100万像素，适合8GB显存)
+            image_context_strategy: 图片上下文策略
+            max_recent_images: 保留的最近图片数量
+            enable_image_summary: 是否启用图片摘要
         """
         self.model_path = model_path
         self.quantization = quantization
@@ -35,6 +53,14 @@ class ModelManager:
         self.model = None
         self.processor = None
         self.device = None
+        
+        # 初始化图片上下文管理器
+        self.image_context_manager = ImageContextManager(
+            strategy=image_context_strategy,
+            max_recent_images=max_recent_images,
+            enable_summary=enable_image_summary
+        )
+        logger.info(f"🎯 图片上下文策略: {image_context_strategy}")
         
     def check_gpu(self) -> tuple[bool, float]:
         """检查GPU可用性"""
@@ -191,9 +217,9 @@ class ModelManager:
             
             logger.info(f"🤔 生成回复: {prompt[:50]}... (图片数: {len(image_paths)}, 历史消息数: {len(history)})")
             
-            # 统一预处理图片（压缩以节省显存）
+            # 统一预处理当前图片（压缩以节省显存）
             if image_paths and len(image_paths) > 0:
-                logger.info("🖼️ 开始预处理图片...")
+                logger.info("🖼️ 开始预处理当前图片...")
                 processed_paths = []
                 for img_path in image_paths:
                     processed_path = self.preprocess_image(img_path, max_size=1024)
@@ -202,83 +228,57 @@ class ModelManager:
                     if processed_path != img_path:
                         compressed_paths.append(processed_path)
                 image_paths = processed_paths
-                logger.info(f"✅ 图片预处理完成，生成了{len(compressed_paths)}个压缩文件")
+                logger.info(f"✅ 当前图片预处理完成，生成了{len(compressed_paths)}个压缩文件")
             
             # 清理CUDA缓存
             self.clear_cuda_cache()
             
-            # 构建消息列表，包含历史对话
-            messages = []
+            # 🎯 核心改进：使用图片上下文管理器处理历史图片
+            # 根据策略决定如何处理历史图片（转文本描述 or 保留部分图片）
+            logger.info("=" * 60)
+            logger.info("🚀 使用智能图片上下文管理器")
             
-            # 添加历史消息（包含图片）
-            # 用于给图片编号，便于后续引用
-            total_image_counter = 0
+            messages_from_manager, images_to_encode = self.image_context_manager.process_conversation_images(
+                current_image_paths=image_paths,
+                history=history,
+                processor=self.processor,
+                model=self.model
+            )
             
-            for hist_idx, hist in enumerate(history):
-                role = hist.get('role')
-                content = hist.get('content')
-                
-                if role and content:
-                    hist_content = [{"type": "text", "text": content}]
-                    
-                    # 如果历史消息包含图片，也添加进去（保持多轮对话的上下文）
-                    if role == "user" and hist.get('has_images'):
-                        hist_image_paths = hist.get('image_paths', [])
-                        recovered_count = 0
-                        missing_count = 0
-                        
-                        for img_idx, img_path in enumerate(hist_image_paths):
-                            if os.path.exists(img_path):  # 确保文件仍存在
-                                total_image_counter += 1
-                                # 压缩历史图片以节省显存
-                                processed_hist_path = self.preprocess_image(img_path, max_size=1024)
-                                hist_content.insert(0, {"type": "image", "image": processed_hist_path})
-                                # 如果生成了压缩文件，记录下来用于后续清理
-                                if processed_hist_path != img_path:
-                                    compressed_paths.append(processed_hist_path)
-                                recovered_count += 1
-                                logger.info(f"✅ 历史消息[{hist_idx}] 恢复图片 #{total_image_counter}: {img_path}")
-                            else:
-                                missing_count += 1
-                                logger.warning(f"⚠️ 历史消息[{hist_idx}] 图片文件不存在: {img_path}")
-                        
-                        if recovered_count > 0:
-                            logger.info(f"📎 历史消息[{hist_idx}] 成功恢复 {recovered_count} 张图片")
-                        if missing_count > 0:
-                            logger.warning(f"⚠️ 历史消息[{hist_idx}] 有 {missing_count} 张图片丢失")
-                    
-                    messages.append({
-                        "role": role,
-                        "content": hist_content
-                    })
+            logger.info(f"📊 上下文处理结果:")
+            logger.info(f"   • 历史消息数: {len(messages_from_manager)}")
+            logger.info(f"   • 需编码图片数: {len(images_to_encode)}")
+            logger.info(f"   • 策略: {self.image_context_manager.strategy}")
+            logger.info("=" * 60)
             
-            # 添加当前用户消息
+            # 添加当前用户消息（包含当前图片）
             current_content = []
             
-            # 添加多张图片
-            current_image_count = 0
+            # 添加当前图片
+            current_image_count = len(image_paths)
             if image_paths and len(image_paths) > 0:
                 for idx, image_path in enumerate(image_paths):
-                    total_image_counter += 1
                     current_content.append({
                         "type": "image",
                         "image": image_path
                     })
-                    current_image_count += 1
-                    logger.info(f"🖼️ 当前消息图片 #{total_image_counter}: {image_path}")
+                    logger.info(f"🖼️ 当前消息图片 #{idx+1}: {image_path}")
                 logger.info(f"📸 当前消息包含 {len(image_paths)} 张新图片")
             
-            # 使用辅助方法构建增强的提示词
-            enhanced_prompt = self._build_enhanced_prompt(prompt, total_image_counter, current_image_count)
+            # 构建提示词
+            enhanced_prompt = prompt
+            if current_image_count > 1:
+                enhanced_prompt += "\n\n请仔细分析每一张图片，对比它们之间的差异和联系，并给出综合的分析结果。"
             
             current_content.append({"type": "text", "text": enhanced_prompt})
             
-            messages.append({
+            # 构建最终消息列表
+            messages = messages_from_manager + [{
                 "role": "user",
                 "content": current_content
-            })
+            }]
             
-            logger.info(f"📝 消息总数: {len(messages)}, 图片总数: {total_image_counter} (历史: {total_image_counter - current_image_count}, 当前: {current_image_count})")
+            logger.info(f"📝 最终消息总数: {len(messages)}, 需编码图片总数: {len(images_to_encode)}")
             
             # 应用聊天模板
             text = self.processor.apply_chat_template(
@@ -482,43 +482,6 @@ class ModelManager:
             gc.collect()
             logger.info("🧹 已清理CUDA缓存")
     
-    def _build_enhanced_prompt(self, prompt: str, total_image_counter: int, current_image_count: int) -> str:
-        """
-        构建增强的提示词，包含图片上下文信息
-        
-        Args:
-            prompt: 原始用户输入
-            total_image_counter: 总图片数量（历史+当前）
-            current_image_count: 当前上传的图片数量
-            
-        Returns:
-            增强后的提示词
-        """
-        enhanced_prompt = prompt
-        
-        # 如果有图片，添加上下文说明
-        if total_image_counter > 0:
-            context_info = []
-            history_image_count = total_image_counter - current_image_count
-            
-            if history_image_count > 0 and current_image_count > 0:
-                context_info.append(f"【图片上下文】本次对话共有 {total_image_counter} 张图片：")
-                context_info.append(f"• 之前上传的图片: 第1张到第{history_image_count}张")
-                context_info.append(f"• 本次上传的图片: 第{history_image_count+1}张到第{total_image_counter}张")
-            elif history_image_count > 0:
-                context_info.append(f"【图片上下文】本次对话包含之前上传的 {history_image_count} 张图片（第1张到第{history_image_count}张），请基于这些图片回答问题。")
-            elif current_image_count > 1:
-                context_info.append(f"【图片上下文】本次上传了 {current_image_count} 张图片（第1张到第{current_image_count}张）。")
-            
-            if context_info:
-                enhanced_prompt = "\n".join(context_info) + "\n\n【用户问题】" + prompt
-                logger.info(f"📝 已添加图片上下文说明 (总计{total_image_counter}张, 历史{history_image_count}张, 当前{current_image_count}张)")
-        
-        # 如果当前上传多张图片，添加分析提示
-        if current_image_count > 1:
-            enhanced_prompt += "\n\n请仔细分析每一张图片，对比它们之间的差异和联系，并给出综合的分析结果。"
-        
-        return enhanced_prompt
     
     def generate_response_stream(
         self,
@@ -554,9 +517,9 @@ class ModelManager:
             
             logger.info(f"🤔 流式生成回复: {prompt[:50]}... (图片数: {len(image_paths)}, 历史消息数: {len(history)})")
             
-            # 统一预处理图片（压缩以节省显存）
+            # 统一预处理当前图片（压缩以节省显存）
             if image_paths and len(image_paths) > 0:
-                logger.info("🖼️ 开始预处理图片...")
+                logger.info("🖼️ [流式] 开始预处理当前图片...")
                 processed_paths = []
                 for img_path in image_paths:
                     processed_path = self.preprocess_image(img_path, max_size=1024)
@@ -566,83 +529,56 @@ class ModelManager:
                         compressed_paths_container.append(processed_path)
                 image_paths = processed_paths
                 if compressed_paths_container is not None:
-                    logger.info(f"✅ 图片预处理完成，生成了{len(compressed_paths_container)}个压缩文件")
+                    logger.info(f"✅ [流式] 当前图片预处理完成，生成了{len(compressed_paths_container)}个压缩文件")
             
             # 清理CUDA缓存
             self.clear_cuda_cache()
             
-            # 构建消息列表，包含历史对话
-            messages = []
+            # 🎯 核心改进：使用图片上下文管理器处理历史图片
+            logger.info("=" * 60)
+            logger.info("🚀 [流式] 使用智能图片上下文管理器")
             
-            # 添加历史消息（包含图片）
-            # 用于给图片编号，便于后续引用
-            total_image_counter = 0
+            messages_from_manager, images_to_encode = self.image_context_manager.process_conversation_images(
+                current_image_paths=image_paths,
+                history=history,
+                processor=self.processor,
+                model=self.model
+            )
             
-            for hist_idx, hist in enumerate(history):
-                role = hist.get('role')
-                content = hist.get('content')
-                
-                if role and content:
-                    hist_content = [{"type": "text", "text": content}]
-                    
-                    # 如果历史消息包含图片，也添加进去（保持多轮对话的上下文）
-                    if role == "user" and hist.get('has_images'):
-                        hist_image_paths = hist.get('image_paths', [])
-                        recovered_count = 0
-                        missing_count = 0
-                        
-                        for img_idx, img_path in enumerate(hist_image_paths):
-                            if os.path.exists(img_path):  # 确保文件仍存在
-                                total_image_counter += 1
-                                # 压缩历史图片以节省显存
-                                processed_hist_path = self.preprocess_image(img_path, max_size=1024)
-                                hist_content.insert(0, {"type": "image", "image": processed_hist_path})
-                                # 如果生成了压缩文件，记录下来用于后续清理
-                                if processed_hist_path != img_path and compressed_paths_container is not None:
-                                    compressed_paths_container.append(processed_hist_path)
-                                recovered_count += 1
-                                logger.info(f"✅ [流式] 历史消息[{hist_idx}] 恢复图片 #{total_image_counter}: {img_path}")
-                            else:
-                                missing_count += 1
-                                logger.warning(f"⚠️ [流式] 历史消息[{hist_idx}] 图片文件不存在: {img_path}")
-                        
-                        if recovered_count > 0:
-                            logger.info(f"📎 [流式] 历史消息[{hist_idx}] 成功恢复 {recovered_count} 张图片")
-                        if missing_count > 0:
-                            logger.warning(f"⚠️ [流式] 历史消息[{hist_idx}] 有 {missing_count} 张图片丢失")
-                    
-                    messages.append({
-                        "role": role,
-                        "content": hist_content
-                    })
+            logger.info(f"📊 [流式] 上下文处理结果:")
+            logger.info(f"   • 历史消息数: {len(messages_from_manager)}")
+            logger.info(f"   • 需编码图片数: {len(images_to_encode)}")
+            logger.info(f"   • 策略: {self.image_context_manager.strategy}")
+            logger.info("=" * 60)
             
-            # 添加当前用户消息
+            # 添加当前用户消息（包含当前图片）
             current_content = []
             
-            # 添加多张图片
-            current_image_count = 0
+            # 添加当前图片
+            current_image_count = len(image_paths)
             if image_paths and len(image_paths) > 0:
                 for idx, image_path in enumerate(image_paths):
-                    total_image_counter += 1
                     current_content.append({
                         "type": "image",
                         "image": image_path
                     })
-                    current_image_count += 1
-                    logger.info(f"🖼️ [流式] 当前消息图片 #{total_image_counter}: {image_path}")
+                    logger.info(f"🖼️ [流式] 当前消息图片 #{idx+1}: {image_path}")
                 logger.info(f"📸 [流式] 当前消息包含 {len(image_paths)} 张新图片")
             
-            # 使用辅助方法构建增强的提示词
-            enhanced_prompt = self._build_enhanced_prompt(prompt, total_image_counter, current_image_count)
+            # 构建提示词
+            enhanced_prompt = prompt
+            if current_image_count > 1:
+                enhanced_prompt += "\n\n请仔细分析每一张图片，对比它们之间的差异和联系，并给出综合的分析结果。"
             
             current_content.append({"type": "text", "text": enhanced_prompt})
             
-            messages.append({
+            # 构建最终消息列表
+            messages = messages_from_manager + [{
                 "role": "user",
                 "content": current_content
-            })
+            }]
             
-            logger.info(f"📝 [流式] 消息总数: {len(messages)}, 图片总数: {total_image_counter} (历史: {total_image_counter - current_image_count}, 当前: {current_image_count})")
+            logger.info(f"📝 [流式] 最终消息总数: {len(messages)}, 需编码图片总数: {len(images_to_encode)}")
             
             # 应用聊天模板
             text = self.processor.apply_chat_template(

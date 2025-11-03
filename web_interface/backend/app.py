@@ -137,13 +137,17 @@ def load_model():
                 "error": f"模型路径不存在: {config.MODEL_PATH}"
             }), 404
         
-        # 创建模型管理器（包含显存优化配置）
+        # 创建模型管理器（包含显存优化配置和图片上下文策略）
         logger.info(f"开始加载模型: {config.MODEL_PATH}")
         logger.info(f"显存优化配置 - max_pixels: {config.MAX_PIXELS}, 图片压缩尺寸: {config.IMAGE_COMPRESSION_MAX_SIZE}")
+        logger.info(f"图片上下文策略: {config.IMAGE_CONTEXT_STRATEGY}")
         model_manager = ModelManager(
             model_path=config.MODEL_PATH,
             quantization=config.DEFAULT_QUANTIZATION,
-            max_pixels=config.MAX_PIXELS
+            max_pixels=config.MAX_PIXELS,
+            image_context_strategy=config.IMAGE_CONTEXT_STRATEGY,
+            max_recent_images=config.MAX_RECENT_IMAGES,
+            enable_image_summary=config.ENABLE_IMAGE_SUMMARY
         )
         
         # 加载模型

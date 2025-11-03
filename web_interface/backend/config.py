@@ -16,6 +16,15 @@ DEFAULT_QUANTIZATION = "4bit"  # 默认使用4bit量化
 MAX_PIXELS = 1003520  # 约100万像素 (原始1280万 -> 100万，减少约12倍显存占用)
 IMAGE_COMPRESSION_MAX_SIZE = 1024  # 图片预处理最大边长（像素）
 
+# 图片上下文策略配置 - 核心性能优化
+# 策略说明：
+# - "current_only": 仅使用当前图片（性能最优，适合8GB显存）
+# - "current_with_text_history": 当前图片 + 历史图片文本描述（推荐，平衡性能和上下文）
+# - "current_with_recent_images": 当前图片 + 最近N张历史图片（高质量，但性能较差）
+IMAGE_CONTEXT_STRATEGY = "current_with_text_history"  # 推荐使用此策略
+MAX_RECENT_IMAGES = 2  # 策略3中保留的最近图片数量
+ENABLE_IMAGE_SUMMARY = True  # 是否启用图片摘要功能（首次上传时生成）
+
 # 上传文件配置
 UPLOAD_FOLDER = os.path.join(PROJECT_ROOT, "web_interface", "uploads")
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'}
