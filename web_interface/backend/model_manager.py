@@ -342,7 +342,17 @@ class ModelManager:
                 clean_up_tokenization_spaces=False
             )[0]
             
-            logger.info(f"✅ 生成完成，长度: {len(response)}")
+            # 统计token消耗
+            input_tokens = inputs.input_ids.shape[1]  # 输入token数量
+            output_tokens = len(generated_ids_trimmed[0])  # 输出token数量
+            total_tokens = input_tokens + output_tokens  # 总token数量
+            
+            logger.info(f"✅ 生成完成，响应长度: {len(response)} 字符")
+            logger.info(f"📊 Token消耗统计:")
+            logger.info(f"   • 输入Token: {input_tokens}")
+            logger.info(f"   • 输出Token: {output_tokens}")
+            logger.info(f"   • 总Token数: {total_tokens}")
+            logger.info(f"=" * 60)
             
             return {
                 "success": True,
@@ -690,17 +700,45 @@ class ModelManager:
                 "streamer": streamer
             }
             
+            # 用于保存生成的token IDs
+            generated_ids_container = []
+            
+            # 定义生成函数，保存结果
+            def generate_with_save():
+                result = self.model.generate(**generation_kwargs)
+                generated_ids_container.append(result)
+            
             # 在单独的线程中生成
-            thread = Thread(target=self.model.generate, kwargs=generation_kwargs)
+            thread = Thread(target=generate_with_save)
             thread.start()
             
             # 流式输出生成的文本
+            generated_text = ""
             for text_chunk in streamer:
+                generated_text += text_chunk
                 yield text_chunk
             
             thread.join()
             
+            # 统计token消耗
+            input_tokens = inputs.input_ids.shape[1]  # 输入token数量
+            
+            # 从保存的结果中获取输出token数量
+            if generated_ids_container:
+                generated_ids = generated_ids_container[0]
+                output_tokens = generated_ids.shape[1] - input_tokens  # 输出token数量
+            else:
+                # 如果无法获取生成的IDs，使用文本长度估算
+                output_tokens = len(generated_text)  # 粗略估计
+            
+            total_tokens = input_tokens + output_tokens  # 总token数量
+            
             logger.info("✅ 流式生成完成")
+            logger.info(f"📊 Token消耗统计:")
+            logger.info(f"   • 输入Token: {input_tokens}")
+            logger.info(f"   • 输出Token: {output_tokens}")
+            logger.info(f"   • 总Token数: {total_tokens}")
+            logger.info(f"=" * 60)
             
         except Exception as e:
             logger.error(f"❌ 流式生成失败: {e}")
