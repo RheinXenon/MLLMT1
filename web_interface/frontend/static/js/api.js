@@ -91,9 +91,10 @@ class APIClient {
 
     /**
      * 加载模型
+     * @param {string} quantization - 量化模式 (4bit, 8bit, standard, cpu)
      */
-    async loadModel() {
-        return await this.post('/api/load_model', {});
+    async loadModel(quantization = '4bit') {
+        return await this.post('/api/load_model', { quantization });
     }
 
     /**

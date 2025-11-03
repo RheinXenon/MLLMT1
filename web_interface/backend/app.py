@@ -99,7 +99,7 @@ def get_status():
         status = {
             "service": "running",
             "model_loaded": model_manager is not None and model_manager.is_loaded(),
-            "quantization": config.DEFAULT_QUANTIZATION if model_manager else None
+            "quantization": model_manager.quantization if model_manager and model_manager.is_loaded() else None
         }
         
         # 如果模型已加载，添加GPU信息
@@ -137,13 +137,26 @@ def load_model():
                 "error": f"模型路径不存在: {config.MODEL_PATH}"
             }), 404
         
+        # 获取量化模式（从请求中获取，默认使用配置文件中的值）
+        data = request.get_json() if request.is_json else {}
+        quantization = data.get('quantization', config.DEFAULT_QUANTIZATION)
+        
+        # 验证量化模式
+        valid_modes = ['4bit', '8bit', 'standard', 'cpu']
+        if quantization not in valid_modes:
+            return jsonify({
+                "success": False,
+                "error": f"无效的量化模式: {quantization}，支持的模式: {', '.join(valid_modes)}"
+            }), 400
+        
         # 创建模型管理器（包含显存优化配置和图片上下文策略）
         logger.info(f"开始加载模型: {config.MODEL_PATH}")
+        logger.info(f"量化模式: {quantization}")
         logger.info(f"显存优化配置 - max_pixels: {config.MAX_PIXELS}, 图片压缩尺寸: {config.IMAGE_COMPRESSION_MAX_SIZE}")
         logger.info(f"图片上下文策略: {config.IMAGE_CONTEXT_STRATEGY}")
         model_manager = ModelManager(
             model_path=config.MODEL_PATH,
-            quantization=config.DEFAULT_QUANTIZATION,
+            quantization=quantization,
             max_pixels=config.MAX_PIXELS,
             image_context_strategy=config.IMAGE_CONTEXT_STRATEGY,
             max_recent_images=config.MAX_RECENT_IMAGES,
@@ -157,7 +170,7 @@ def load_model():
             return jsonify({
                 "success": True,
                 "message": "模型加载成功",
-                "quantization": config.DEFAULT_QUANTIZATION
+                "quantization": quantization
             })
         else:
             return jsonify({

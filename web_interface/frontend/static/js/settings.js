@@ -15,6 +15,10 @@ const elements = {
     loadModelBtn: document.getElementById('load-model-btn'),
     unloadModelBtn: document.getElementById('unload-model-btn'),
     
+    // 量化模式选择
+    quantizationSelect: document.getElementById('quantization-select'),
+    quantizationDisplay: document.getElementById('quantization-display'),
+    
     // 输入
     temperatureInput: document.getElementById('temperature'),
     temperatureValue: document.getElementById('temperature-value'),
@@ -57,6 +61,11 @@ function loadSettings() {
         elements.maxTokensInput.value = settings.maxTokens;
         elements.maxTokensValue.textContent = settings.maxTokens;
     }
+    
+    // 加载量化模式设置（默认4bit）
+    const quantization = settings.quantization || '4bit';
+    elements.quantizationSelect.value = quantization;
+    elements.quantizationDisplay.textContent = quantization;
 }
 
 /**
@@ -65,7 +74,8 @@ function loadSettings() {
 function saveSettings() {
     const settings = {
         temperature: parseFloat(elements.temperatureInput.value),
-        maxTokens: parseInt(elements.maxTokensInput.value)
+        maxTokens: parseInt(elements.maxTokensInput.value),
+        quantization: elements.quantizationSelect.value
     };
     
     localStorage.setItem('generationSettings', JSON.stringify(settings));
@@ -78,6 +88,12 @@ function bindEventListeners() {
     // 模型控制按钮
     elements.loadModelBtn.addEventListener('click', handleLoadModel);
     elements.unloadModelBtn.addEventListener('click', handleUnloadModel);
+    
+    // 量化模式选择
+    elements.quantizationSelect.addEventListener('change', (e) => {
+        elements.quantizationDisplay.textContent = e.target.value;
+        saveSettings();
+    });
     
     // 设置滑块
     elements.temperatureInput.addEventListener('input', (e) => {
@@ -145,14 +161,30 @@ function updateModelStatus(loaded) {
  * 加载模型
  */
 async function handleLoadModel() {
-    showLoading('正在加载模型，请稍候...');
+    // 获取用户选择的量化模式
+    const quantization = elements.quantizationSelect.value;
+    
+    // 显示友好的加载提示
+    const modeNames = {
+        '4bit': '4-bit量化',
+        '8bit': '8-bit量化',
+        'standard': '标准',
+        'cpu': 'CPU'
+    };
+    const modeName = modeNames[quantization] || quantization;
+    
+    showLoading(`正在以${modeName}模式加载模型，请稍候...`);
     
     try {
-        const result = await apiClient.loadModel();
+        const result = await apiClient.loadModel(quantization);
         
         if (result.success) {
             updateModelStatus(true);
-            showNotification('模型加载成功！', 'success');
+            // 更新量化模式显示
+            if (result.quantization) {
+                elements.quantizationMode.textContent = result.quantization;
+            }
+            showNotification(`模型加载成功！(${modeName}模式)`, 'success');
         } else {
             showNotification(result.error || '模型加载失败', 'error');
         }

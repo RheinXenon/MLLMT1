@@ -288,6 +288,35 @@ body {
     color: var(--text-primary);
 }
 
+/* 下拉选择框样式 */
+.quantization-select {
+    width: 100%;
+    padding: var(--spacing-md);
+    border: 2px solid var(--border-color);
+    border-radius: var(--radius-md);
+    font-family: inherit;
+    font-size: 0.9375rem;
+    background: var(--surface-color);
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: all 0.2s;
+    margin-bottom: var(--spacing-sm);
+}
+
+.quantization-select:hover {
+    border-color: var(--primary-color);
+}
+
+.quantization-select:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+.quantization-select option {
+    padding: var(--spacing-sm);
+}
+
 /* 按钮样式 */
 .btn {
     display: inline-flex;
@@ -876,6 +905,7 @@ body {
 /* ===== 设置页面样式 ===== */
 .settings-content {
     padding: var(--spacing-xl);
+    overflow-y: auto;
 }
 
 .settings-panels {
@@ -884,6 +914,7 @@ body {
     display: flex;
     flex-direction: column;
     gap: var(--spacing-xl);
+    padding-bottom: var(--spacing-xl);
 }
 
 .settings-panel {

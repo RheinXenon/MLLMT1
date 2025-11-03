@@ -57,6 +57,27 @@
                 <!-- 模型控制 -->
                 <div class="settings-panel">
                     <h3>🚀 模型控制</h3>
+                    
+                    <!-- 量化模式选择 -->
+                    <div class="setting-item">
+                        <div class="setting-header">
+                            <label for="quantization-select">加载方式</label>
+                            <span class="setting-value" id="quantization-display">4bit</span>
+                        </div>
+                        <select id="quantization-select" class="quantization-select">
+                            <option value="4bit" selected>4-bit 量化 (推荐，显存友好)</option>
+                            <option value="8bit">8-bit 量化 (平衡性能与显存)</option>
+                            <option value="standard">标准模式 (需要大显存)</option>
+                            <option value="cpu">CPU模式 (无需显卡)</option>
+                        </select>
+                        <p class="setting-description">
+                            <strong>4-bit:</strong> 显存占用最小，适合8GB显存显卡<br>
+                            <strong>8-bit:</strong> 显存占用适中，推荐16GB显存<br>
+                            <strong>标准:</strong> 原始精度，需要24GB+显存<br>
+                            <strong>CPU:</strong> 使用CPU运行，速度较慢但无需显卡
+                        </p>
+                    </div>
+                    
                     <div class="button-group">
                         <button id="load-model-btn" class="btn btn-primary btn-large">
                             <span class="btn-icon">🚀</span>
