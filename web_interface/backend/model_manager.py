@@ -354,6 +354,20 @@ class ModelManager:
             logger.info(f"   • 总Token数: {total_tokens}")
             logger.info(f"=" * 60)
             
+            # 🔥 修复：为新上传的图片生成摘要（用于后续对话）
+            if image_paths and len(image_paths) > 0 and self.image_context_manager.enable_summary:
+                logger.info("🔍 开始为新上传的图片生成摘要...")
+                try:
+                    summaries = self.image_context_manager.batch_generate_image_summaries(
+                        image_paths=image_paths,
+                        processor=self.processor,
+                        model=self.model,
+                        device=self.device
+                    )
+                    logger.info(f"✅ 已生成 {len(summaries)} 个图片摘要，已缓存供后续对话使用")
+                except Exception as e:
+                    logger.warning(f"⚠️ 生成图片摘要失败（不影响当前对话）: {e}")
+            
             return {
                 "success": True,
                 "response": response,
@@ -675,6 +689,20 @@ class ModelManager:
             logger.info(f"   • 输出Token: {output_tokens}")
             logger.info(f"   • 总Token数: {total_tokens}")
             logger.info(f"=" * 60)
+            
+            # 🔥 修复：为新上传的图片生成摘要（用于后续对话）
+            if image_paths and len(image_paths) > 0 and self.image_context_manager.enable_summary:
+                logger.info("🔍 [流式] 开始为新上传的图片生成摘要...")
+                try:
+                    summaries = self.image_context_manager.batch_generate_image_summaries(
+                        image_paths=image_paths,
+                        processor=self.processor,
+                        model=self.model,
+                        device=self.device
+                    )
+                    logger.info(f"✅ [流式] 已生成 {len(summaries)} 个图片摘要，已缓存供后续对话使用")
+                except Exception as e:
+                    logger.warning(f"⚠️ [流式] 生成图片摘要失败（不影响当前对话）: {e}")
             
         except Exception as e:
             logger.error(f"❌ 流式生成失败: {e}")
