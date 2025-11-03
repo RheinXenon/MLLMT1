@@ -210,16 +210,31 @@ class ModelManager:
             # 构建消息列表，包含历史对话
             messages = []
             
-            # 添加历史消息
+            # 添加历史消息（包含图片）
             for hist in history:
                 role = hist.get('role')
                 content = hist.get('content')
                 
                 if role and content:
-                    # 历史消息只包含文本（图片不重复发送）
+                    hist_content = [{"type": "text", "text": content}]
+                    
+                    # 如果历史消息包含图片，也添加进去（保持多轮对话的上下文）
+                    if role == "user" and hist.get('has_images'):
+                        hist_image_paths = hist.get('image_paths', [])
+                        for img_path in hist_image_paths:
+                            if os.path.exists(img_path):  # 确保文件仍存在
+                                # 压缩历史图片以节省显存
+                                processed_hist_path = self.preprocess_image(img_path, max_size=1024)
+                                hist_content.insert(0, {"type": "image", "image": processed_hist_path})
+                                # 如果生成了压缩文件，记录下来用于后续清理
+                                if processed_hist_path != img_path:
+                                    compressed_paths.append(processed_hist_path)
+                        if hist_image_paths:
+                            logger.info(f"📎 从历史中恢复{len(hist_image_paths)}张图片（已压缩）")
+                    
                     messages.append({
                         "role": role,
-                        "content": [{"type": "text", "text": content}]
+                        "content": hist_content
                     })
             
             # 添加当前用户消息
@@ -256,13 +271,17 @@ class ModelManager:
                 add_generation_prompt=True
             )
             
-            # 处理视觉信息（只处理当前消息）
+            # 处理视觉信息（处理所有消息，包括历史中的图片）
             image_inputs = None
             video_inputs = None
-            if image_paths and len(image_paths) > 0:
-                # 只处理当前的图片消息
-                current_messages = [messages[-1]]
-                image_inputs, video_inputs = process_vision_info(current_messages)
+            # 检查是否有任何消息包含图片
+            has_any_images = any(
+                any(item.get('type') == 'image' for item in msg.get('content', []))
+                for msg in messages
+            )
+            if has_any_images:
+                # 处理所有消息中的图片（包括历史消息）
+                image_inputs, video_inputs = process_vision_info(messages)
             
             # 处理输入
             inputs = self.processor(
@@ -491,16 +510,31 @@ class ModelManager:
             # 构建消息列表，包含历史对话
             messages = []
             
-            # 添加历史消息
+            # 添加历史消息（包含图片）
             for hist in history:
                 role = hist.get('role')
                 content = hist.get('content')
                 
                 if role and content:
-                    # 历史消息只包含文本（图片不重复发送）
+                    hist_content = [{"type": "text", "text": content}]
+                    
+                    # 如果历史消息包含图片，也添加进去（保持多轮对话的上下文）
+                    if role == "user" and hist.get('has_images'):
+                        hist_image_paths = hist.get('image_paths', [])
+                        for img_path in hist_image_paths:
+                            if os.path.exists(img_path):  # 确保文件仍存在
+                                # 压缩历史图片以节省显存
+                                processed_hist_path = self.preprocess_image(img_path, max_size=1024)
+                                hist_content.insert(0, {"type": "image", "image": processed_hist_path})
+                                # 如果生成了压缩文件，记录下来用于后续清理
+                                if processed_hist_path != img_path and compressed_paths_container is not None:
+                                    compressed_paths_container.append(processed_hist_path)
+                        if hist_image_paths:
+                            logger.info(f"📎 从历史中恢复{len(hist_image_paths)}张图片（已压缩）")
+                    
                     messages.append({
                         "role": role,
-                        "content": [{"type": "text", "text": content}]
+                        "content": hist_content
                     })
             
             # 添加当前用户消息
@@ -537,13 +571,17 @@ class ModelManager:
                 add_generation_prompt=True
             )
             
-            # 处理视觉信息（只处理当前消息）
+            # 处理视觉信息（处理所有消息，包括历史中的图片）
             image_inputs = None
             video_inputs = None
-            if image_paths and len(image_paths) > 0:
-                # 只处理当前的图片消息
-                current_messages = [messages[-1]]
-                image_inputs, video_inputs = process_vision_info(current_messages)
+            # 检查是否有任何消息包含图片
+            has_any_images = any(
+                any(item.get('type') == 'image' for item in msg.get('content', []))
+                for msg in messages
+            )
+            if has_any_images:
+                # 处理所有消息中的图片（包括历史消息）
+                image_inputs, video_inputs = process_vision_info(messages)
             
             # 处理输入
             inputs = self.processor(

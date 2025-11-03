@@ -246,12 +246,13 @@ def chat():
         
         # 如果生成成功，保存到历史记录
         if result.get('success'):
-            # 保存用户消息
+            # 保存用户消息（包含图片路径以便后续对话使用）
             user_message = {
                 "role": "user",
                 "content": prompt,
                 "has_images": len(image_paths) > 0,
                 "image_count": len(image_paths),
+                "image_paths": image_paths.copy(),  # 保存原始图片路径用于后续对话
                 "timestamp": datetime.now().isoformat()
             }
             conversation_sessions[session_id].append(user_message)
@@ -269,15 +270,18 @@ def chat():
             
             logger.info(f"对话已保存到历史 [会话:{session_id[:8]}], 当前消息数: {len(conversation_sessions[session_id])}")
         
-        # 清理上传的临时图片（原始文件和压缩文件）
-        all_temp_files = image_paths + compressed_paths
-        for temp_path in all_temp_files:
+        # 清理上传的临时文件（只删除压缩文件，保留原始图片用于后续对话）
+        for temp_path in compressed_paths:
             if os.path.exists(temp_path):
                 try:
                     os.remove(temp_path)
-                    logger.info(f"删除临时文件: {temp_path}")
+                    logger.info(f"删除临时压缩文件: {temp_path}")
                 except Exception as e:
                     logger.warning(f"删除临时文件失败: {e}")
+        
+        # 原始图片保留在会话中，等清理历史时一并删除
+        if result.get('success'):
+            logger.info(f"保留{len(image_paths)}张原始图片用于后续对话")
         
         return jsonify(result)
         
@@ -360,12 +364,13 @@ def chat_stream():
         config_str = request.form.get('config')
         generation_config = json.loads(config_str) if config_str else config.GENERATION_CONFIG
         
-        # 保存用户消息
+        # 保存用户消息（包含图片路径以便后续对话使用）
         user_message = {
             "role": "user",
             "content": prompt,
             "has_images": len(image_paths) > 0,
             "image_count": len(image_paths),
+            "image_paths": image_paths.copy(),  # 保存原始图片路径用于后续对话
             "timestamp": datetime.now().isoformat()
         }
         conversation_sessions[session_id].append(user_message)
@@ -413,16 +418,18 @@ def chat_stream():
                 traceback.print_exc()
                 yield f"data: {json.dumps({'error': str(e)})}\n\n"
             finally:
-                # 清理上传的临时文件（原始文件和压缩文件）
-                all_temp_files = image_paths + compressed_paths
-                logger.info(f"开始清理临时文件，共{len(all_temp_files)}个（原始:{len(image_paths)}, 压缩:{len(compressed_paths)}）")
-                for temp_path in all_temp_files:
+                # 清理上传的临时文件（只删除压缩文件，保留原始图片用于后续对话）
+                logger.info(f"开始清理临时文件，共{len(compressed_paths)}个压缩文件（保留{len(image_paths)}张原始图片）")
+                for temp_path in compressed_paths:
                     if os.path.exists(temp_path):
                         try:
                             os.remove(temp_path)
-                            logger.info(f"删除临时文件: {temp_path}")
+                            logger.info(f"删除临时压缩文件: {temp_path}")
                         except Exception as e:
                             logger.warning(f"删除临时文件失败: {e}")
+                
+                # 原始图片保留在会话中，等清理历史时一并删除
+                logger.info(f"保留{len(image_paths)}张原始图片用于后续对话")
                 
                 # 释放并发信号量
                 request_semaphore.release()
@@ -449,11 +456,24 @@ def clear_history():
         if session_id:
             # 清除特定会话的历史
             if session_id in conversation_sessions:
+                # 清理会话相关的图片文件
+                image_count = 0
+                for msg in conversation_sessions[session_id]:
+                    if msg.get('role') == 'user' and msg.get('image_paths'):
+                        for img_path in msg['image_paths']:
+                            if os.path.exists(img_path):
+                                try:
+                                    os.remove(img_path)
+                                    image_count += 1
+                                    logger.info(f"清理会话图片: {img_path}")
+                                except Exception as e:
+                                    logger.warning(f"清理图片失败: {e}")
+                
                 del conversation_sessions[session_id]
-                logger.info(f"已清除会话历史: {session_id[:8]}")
+                logger.info(f"已清除会话历史: {session_id[:8]}, 删除了{image_count}张图片")
                 return jsonify({
                     "success": True,
-                    "message": "对话历史已清除"
+                    "message": f"对话历史已清除（删除了{image_count}张图片）"
                 })
             else:
                 return jsonify({
@@ -462,11 +482,24 @@ def clear_history():
                 })
         else:
             # 清除所有会话历史
+            image_count = 0
+            for sid, messages in conversation_sessions.items():
+                for msg in messages:
+                    if msg.get('role') == 'user' and msg.get('image_paths'):
+                        for img_path in msg['image_paths']:
+                            if os.path.exists(img_path):
+                                try:
+                                    os.remove(img_path)
+                                    image_count += 1
+                                    logger.info(f"清理会话图片: {img_path}")
+                                except Exception as e:
+                                    logger.warning(f"清理图片失败: {e}")
+            
             conversation_sessions.clear()
-            logger.info("已清除所有会话历史")
+            logger.info(f"已清除所有会话历史，删除了{image_count}张图片")
             return jsonify({
                 "success": True,
-                "message": "所有对话历史已清除"
+                "message": f"所有对话历史已清除（删除了{image_count}张图片）"
             })
             
     except Exception as e:
